@@ -21,7 +21,7 @@ Kunpeng Extension for PyTorch（以下简称KPEX）是为鲲鹏平台打造的�
 
 #### 1. 环境准备
 
-KPEX项目编译安装前需要先进行PyTorch编译安装，推荐使用环境管理工具，便于对依赖包进行隔离和管理。
+KPEX项目编译安装前需要先进行 PyTorch 编译安装，推荐使用环境管理工具，便于对依赖包进行隔离和管理。推荐[下载](https://repo.anaconda.com/miniconda/)与[安装使用](https://www.anaconda.com/docs/getting-started/miniconda/install/overview) Miniconda 工具
 
 #### 2. [获取 HPCKit 软件包](https://www.hikunpeng.com/document/detail/zh/kunpenghpcs/hpckit/instg/KunpengHPCKit_install_007.html)
 > https://www.hikunpeng.com/developer/hpc/hpckit-download
@@ -65,6 +65,7 @@ module load bisheng/kml26.0.RC1/kblas/multi
 
 #### 5. 源码编译安装
 
+进行 KPEX 编译安装前，需要先完成 [PyTorch 编译安装](requirements_install.md)
 - 如果使用源码压缩包的代码下载方式
 ##### 上传并解压 KPEX 项目源码包（分支名根据实际情况调整）
 ```
@@ -87,7 +88,7 @@ CFLAGS="-stdlib=libstdc++ -lstdc++" KPEX_BUILD_TYPE=release HMPI_ROOT=<path_to_H
 
 执行**python**命令进入python命令行，在命令行中执行：
 ```
-import torch
+import kpex
 ```
 无报错回显，则说明编译安装成功。
 
