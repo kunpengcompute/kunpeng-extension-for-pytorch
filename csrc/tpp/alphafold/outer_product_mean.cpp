@@ -47,7 +47,7 @@ void default_block_size(int64_t n_seq, int64_t n_res_gather, int64_t &left_block
         right_block_size = std::clamp(n_res_gather / 8, (int64_t)16, (int64_t)192);
     }
 }
-}
+} // namespace
 
 OuterProductMeanWeight::OuterProductMeanWeight(at::Tensor &input_ln_w, at::Tensor &input_ln_b, at::Tensor &left_proj_w,
                                                at::Tensor &left_proj_b, at::Tensor &right_proj_w,
@@ -61,8 +61,9 @@ OuterProductMeanWeight::OuterProductMeanWeight(at::Tensor &input_ln_w, at::Tenso
     int64_t c_z = output_w.sizes()[0];
     // c_i ^ 2 * left_block_size_max(80) * right_block_size_max(192) < INT64_MAX
     // c_z * left_block_size_max(80) * right_block_size_max(192) < INT64_MAX
-    KPEX_CHECK(c_m > 0 && c_i > 0 && c_z > 0 && c_i <= std::sqrt(INT64_MAX / (80 * 192)) && c_z <= INT64_MAX / (80 * 192) && c_m <= INT64_MAX && c_m <= INT64_MAX / c_i,
-        "invalid input_ln_w shape & invalid left_proj_w shape & invalid output_w shape");
+    KPEX_CHECK(c_m > 0 && c_i > 0 && c_z > 0 && c_i <= std::sqrt(INT64_MAX / (80 * 192)) &&
+                   c_z <= INT64_MAX / (80 * 192) && c_m <= INT64_MAX && c_m <= INT64_MAX / c_i,
+               "invalid input_ln_w shape & invalid left_proj_w shape & invalid output_w shape");
     KPEX_CHECK_TENSOR_SHAPE(input_ln_b, c_m);
     KPEX_CHECK_TENSOR_SHAPE(left_proj_w, c_i, c_m);
     KPEX_CHECK_TENSOR_SHAPE(left_proj_b, c_i);
@@ -114,7 +115,8 @@ at::Tensor outer_product_mean(at::Tensor &act, at::Tensor &mask, const OuterProd
     left_block_size = left_block_size_.value_or(left_block_size);
     right_block_size = right_block_size_.value_or(right_block_size);
 
-    KPEX_CHECK(left_block_size > 0 && right_block_size > 0, "left_block_size or right_block_size values are less than or equal to zero\n");
+    KPEX_CHECK(left_block_size > 0 && right_block_size > 0,
+               "left_block_size or right_block_size values are less than or equal to zero\n");
     KPEX_CHECK(act.dtype() == c10::kBFloat16, act.dtype());
     KPEX_CHECK(mask.dtype() == c10::kBFloat16, mask.dtype());
     KPEX_CHECK_TENSOR_SHAPE(act, n_seq, n_res, c_m);
@@ -150,11 +152,12 @@ at::Tensor outer_product_mean(at::Tensor &act, at::Tensor &mask, const OuterProd
     auto output_b_tw = convert_to_tensor_wrapper(weights.outer_b);
     auto out_tw = convert_to_tensor_wrapper(out);
 
-    kutacc_af2_opm_weights_t_wrapper *opm_weights_ptr = new kutacc_af2_opm_weights_t_wrapper(left_proj_w_tw, left_proj_b_tw, right_proj_w_tw, right_proj_b_tw,
-        output_w_tw, output_b_tw, c_m, c_i, c_z);
-    kutacc_af2_opm_act_inputs_t_wrapper *opm_inputs_ptr = new kutacc_af2_opm_act_inputs_t_wrapper(input_act_tw, left_proj_tw, right_proj_tw, left_proj_tw_,
-        right_proj_tw_, n_seq, n_res);
-    kutacc_af2_opm_mask_inputs_t_wrapper *opm_mask_ptr = new kutacc_af2_opm_mask_inputs_t_wrapper(mask_tw, norm_tw, n_res_gather, mask_bias);
+    kutacc_af2_opm_weights_t_wrapper *opm_weights_ptr = new kutacc_af2_opm_weights_t_wrapper(
+        left_proj_w_tw, left_proj_b_tw, right_proj_w_tw, right_proj_b_tw, output_w_tw, output_b_tw, c_m, c_i, c_z);
+    kutacc_af2_opm_act_inputs_t_wrapper *opm_inputs_ptr = new kutacc_af2_opm_act_inputs_t_wrapper(
+        input_act_tw, left_proj_tw, right_proj_tw, left_proj_tw_, right_proj_tw_, n_seq, n_res);
+    kutacc_af2_opm_mask_inputs_t_wrapper *opm_mask_ptr =
+        new kutacc_af2_opm_mask_inputs_t_wrapper(mask_tw, norm_tw, n_res_gather, mask_bias);
 
     if (unlikely(opm_weights_ptr == nullptr || opm_inputs_ptr == nullptr || opm_mask_ptr == nullptr)) {
         return out;
@@ -170,15 +173,17 @@ at::Tensor outer_product_mean(at::Tensor &act, at::Tensor &mask, const OuterProd
 
         auto all_gather_right_proj_tw_ = convert_to_tensor_wrapper(right_proj_);
 
-        kutacc_af2_opm_act_inputs_t_wrapper *opm_all_gather_inputs_ptr = new kutacc_af2_opm_act_inputs_t_wrapper(input_act_tw, left_proj_tw, right_proj_tw, left_proj_tw_,
-        all_gather_right_proj_tw_, n_seq, n_res);
+        kutacc_af2_opm_act_inputs_t_wrapper *opm_all_gather_inputs_ptr = new kutacc_af2_opm_act_inputs_t_wrapper(
+            input_act_tw, left_proj_tw, right_proj_tw, left_proj_tw_, all_gather_right_proj_tw_, n_seq, n_res);
         if (unlikely(opm_all_gather_inputs_ptr == nullptr)) {
             return out;
         }
-        kutacc_af2_outer_product_mean_chunk(opm_all_gather_inputs_ptr, opm_mask_ptr, opm_weights_ptr, out_tw.get_tensor(), left_block_size, right_block_size);
+        kutacc_af2_outer_product_mean_chunk(opm_all_gather_inputs_ptr, opm_mask_ptr, opm_weights_ptr,
+                                            out_tw.get_tensor(), left_block_size, right_block_size);
         delete opm_all_gather_inputs_ptr;
     } else {
-        kutacc_af2_outer_product_mean_chunk(opm_inputs_ptr, opm_mask_ptr, opm_weights_ptr, out_tw.get_tensor(), left_block_size, right_block_size);
+        kutacc_af2_outer_product_mean_chunk(opm_inputs_ptr, opm_mask_ptr, opm_weights_ptr, out_tw.get_tensor(),
+                                            left_block_size, right_block_size);
     }
     delete opm_inputs_ptr;
     delete opm_weights_ptr;
@@ -186,4 +191,4 @@ at::Tensor outer_product_mean(at::Tensor &act, at::Tensor &mask, const OuterProd
     return out;
 }
 
-}
+} // namespace alphafold

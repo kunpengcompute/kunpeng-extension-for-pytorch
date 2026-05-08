@@ -44,15 +44,13 @@ inline at::Tensor layernorm(const at::Tensor &act, const at::Tensor &weight_, co
         int64_t mi, ni;
         at::native::data_index_init(start, mi, m, ni, n);
         for ([[maybe_unused]] int64_t _ : c10::irange(start, end)) {
-            kutacc_af2_layernorm(
-                (__bf16 *)act.data_ptr() + mi * act.strides()[0] + ni * act.strides()[1],
-                (float *)weight.data_ptr(), (float *)bias.data_ptr(), len, 1e-5, 
-                (__bf16 *)out.data_ptr() + mi * out.strides()[0] + ni * out.strides()[1]);
+            kutacc_af2_layernorm((__bf16 *)act.data_ptr() + mi * act.strides()[0] + ni * act.strides()[1],
+                                 (float *)weight.data_ptr(), (float *)bias.data_ptr(), len, 1e-5,
+                                 (__bf16 *)out.data_ptr() + mi * out.strides()[0] + ni * out.strides()[1]);
             at::native::data_index_step(mi, m, ni, n);
         }
     });
     return out;
 }
-
 
 #endif

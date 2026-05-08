@@ -22,9 +22,8 @@
 
 namespace alphafold {
 
-
-at::Tensor invariant_point_attention(at::Tensor &s, at::Tensor &z, at::Tensor &rigid_trans, at::Tensor &rigid_rot_mats, 
-    at::Tensor &mask, const InvariantPointAttentionWeight &weights) 
+at::Tensor invariant_point_attention(at::Tensor &s, at::Tensor &z, at::Tensor &rigid_trans, at::Tensor &rigid_rot_mats,
+                                     at::Tensor &mask, const InvariantPointAttentionWeight &weights)
 {
     at::Tensor out = at::empty(s.sizes(), s.options());
     int64_t n_res = s.sizes()[0];
@@ -68,9 +67,12 @@ at::Tensor invariant_point_attention(at::Tensor &s, at::Tensor &z, at::Tensor &r
     auto head_weights = at::empty(weights.head_weights.sizes(), weights.head_weights.options());
     auto collect = at::empty({n_res, no_heads * (c_hidden + no_v_points * 4 + c_z)}, s.options());
     auto o = collect.narrow(1, 0, no_heads * c_hidden).view({n_res, no_heads, c_hidden});
-    auto o_pt = collect.narrow(1, no_heads * c_hidden, no_heads * no_v_points * 3).view({n_res, 3, no_heads, no_v_points});
-    auto o_pt_norm = collect.narrow(1, no_heads * (c_hidden + no_v_points * 3), no_heads * no_v_points).view({n_res, no_heads, no_v_points});
-    auto o_pair = collect.narrow(1, no_heads * (c_hidden + no_v_points * 4), no_heads * c_z).view({n_res, no_heads, c_z});
+    auto o_pt =
+        collect.narrow(1, no_heads * c_hidden, no_heads * no_v_points * 3).view({n_res, 3, no_heads, no_v_points});
+    auto o_pt_norm = collect.narrow(1, no_heads * (c_hidden + no_v_points * 3), no_heads * no_v_points)
+                         .view({n_res, no_heads, no_v_points});
+    auto o_pair =
+        collect.narrow(1, no_heads * (c_hidden + no_v_points * 4), no_heads * c_z).view({n_res, no_heads, c_z});
 
     auto q_tw = convert_to_tensor_wrapper(q);
     auto k_tw = convert_to_tensor_wrapper(k);
@@ -94,16 +96,20 @@ at::Tensor invariant_point_attention(at::Tensor &s, at::Tensor &z, at::Tensor &r
     auto linear_b_w_tw = convert_to_tensor_wrapper(weights.linear_b_w);
     auto linear_b_b_tw = convert_to_tensor_wrapper(weights.linear_b_b);
 
-    kutacc_af2_ipa_weights_t_wrapper *ipa_weight_ptr = new kutacc_af2_ipa_weights_t_wrapper(head_weights_tw, weights_head_weights_tw, linear_b_w_tw, linear_b_b_tw, c_z, c_hidden, no_heads,
-        no_qk_points, no_v_points);
-    kutacc_af2_ipa_s_inputs_t_wrapper *ipa_s_ptrs = new kutacc_af2_ipa_s_inputs_t_wrapper(a_tw, b_tw, q_tw, k_tw, v_tw, q_pts_tw, k_pts_tw, v_pts_tw, n_res);
-    kutacc_af2_ipa_o_inputs_t_wrapper *ipa_o_ptrs = new kutacc_af2_ipa_o_inputs_t_wrapper(o_tw, o_pt_tw, o_pt_norm_tw, o_pair_tw);
+    kutacc_af2_ipa_weights_t_wrapper *ipa_weight_ptr =
+        new kutacc_af2_ipa_weights_t_wrapper(head_weights_tw, weights_head_weights_tw, linear_b_w_tw, linear_b_b_tw,
+                                             c_z, c_hidden, no_heads, no_qk_points, no_v_points);
+    kutacc_af2_ipa_s_inputs_t_wrapper *ipa_s_ptrs =
+        new kutacc_af2_ipa_s_inputs_t_wrapper(a_tw, b_tw, q_tw, k_tw, v_tw, q_pts_tw, k_pts_tw, v_pts_tw, n_res);
+    kutacc_af2_ipa_o_inputs_t_wrapper *ipa_o_ptrs =
+        new kutacc_af2_ipa_o_inputs_t_wrapper(o_tw, o_pt_tw, o_pt_norm_tw, o_pair_tw);
 
     if (unlikely(ipa_s_ptrs == nullptr || ipa_o_ptrs == nullptr || ipa_weight_ptr == nullptr)) {
         return out;
     }
 
-    kutacc_af2_invariant_point(ipa_s_ptrs, ipa_o_ptrs, z_tw.get_tensor(), rigid_rot_mats_tw.get_tensor(), rigid_trans_tw.get_tensor(), mask_tw.get_tensor(), ipa_weight_ptr);
+    kutacc_af2_invariant_point(ipa_s_ptrs, ipa_o_ptrs, z_tw.get_tensor(), rigid_rot_mats_tw.get_tensor(),
+                               rigid_trans_tw.get_tensor(), mask_tw.get_tensor(), ipa_weight_ptr);
 
     out = linear(collect, weights.linear_out_w, weights.linear_out_b);
     delete ipa_weight_ptr;
@@ -112,19 +118,20 @@ at::Tensor invariant_point_attention(at::Tensor &s, at::Tensor &z, at::Tensor &r
     return out;
 }
 
-
-InvariantPointAttentionWeight::InvariantPointAttentionWeight(int64_t c_s, int64_t c_z, int64_t c_hidden,
-    int64_t no_heads, int64_t no_qk_points, int64_t no_v_points, at::Tensor &linear_q_w,
-    at::Tensor &linear_q_b, at::Tensor &linear_kv_w, at::Tensor linear_kv_b, at::Tensor &linear_q_points_w,
-    at::Tensor &linear_q_points_b, at::Tensor &linear_kv_points_w, at::Tensor &linear_kv_points_b,
-    at::Tensor &linear_b_w, at::Tensor &linear_b_b, at::Tensor &head_weights, at::Tensor &linear_out_w,
-    at::Tensor &linear_out_b)
+InvariantPointAttentionWeight::InvariantPointAttentionWeight(
+    int64_t c_s, int64_t c_z, int64_t c_hidden, int64_t no_heads, int64_t no_qk_points, int64_t no_v_points,
+    at::Tensor &linear_q_w, at::Tensor &linear_q_b, at::Tensor &linear_kv_w, at::Tensor linear_kv_b,
+    at::Tensor &linear_q_points_w, at::Tensor &linear_q_points_b, at::Tensor &linear_kv_points_w,
+    at::Tensor &linear_kv_points_b, at::Tensor &linear_b_w, at::Tensor &linear_b_b, at::Tensor &head_weights,
+    at::Tensor &linear_out_w, at::Tensor &linear_out_b)
     : c_s(c_s), c_z(c_z), c_hidden(c_hidden), no_heads(no_heads), no_qk_points(no_qk_points), no_v_points(no_v_points)
 {
-    KPEX_CHECK(c_s > 0 && c_z > 0 && c_hidden > 0 && c_hidden <= INT32_MAX && no_heads > 0 && no_qk_points > 0 && no_v_points > 0
-        && no_qk_points <= 16 / 3 && no_v_points <= INT64_MAX - no_qk_points, "invalid int arg for InvariantPointAttentionWeight"); // no_qk_points is smaller than svcntw() / 3
-    KPEX_CHECK(no_v_points <= INT64_MAX / 4 && c_z < INT64_MAX - 4 * no_v_points - c_hidden && no_heads < INT64_MAX / (c_hidden + no_v_points * 4 + c_z),
-        "invalid shape for weights linear_out_w");
+    KPEX_CHECK(c_s > 0 && c_z > 0 && c_hidden > 0 && c_hidden <= INT32_MAX && no_heads > 0 && no_qk_points > 0 &&
+                   no_v_points > 0 && no_qk_points <= 16 / 3 && no_v_points <= INT64_MAX - no_qk_points,
+               "invalid int arg for InvariantPointAttentionWeight"); // no_qk_points is smaller than svcntw() / 3
+    KPEX_CHECK(no_v_points <= INT64_MAX / 4 && c_z < INT64_MAX - 4 * no_v_points - c_hidden &&
+                   no_heads < INT64_MAX / (c_hidden + no_v_points * 4 + c_z),
+               "invalid shape for weights linear_out_w");
     KPEX_CHECK_TENSOR_SHAPE(linear_b_w, no_heads, c_z);
     KPEX_CHECK_TENSOR_SHAPE(linear_b_b, no_heads);
     KPEX_CHECK_TENSOR_SHAPE(head_weights, no_heads);
@@ -137,9 +144,10 @@ InvariantPointAttentionWeight::InvariantPointAttentionWeight(int64_t c_s, int64_
     linear_kv_b = linear_kv_b.view({no_heads, 2 * c_hidden});
     linear_q_points_w = linear_q_points_w.view({3, no_heads, no_qk_points, c_s}).permute({1, 2, 0, 3});
     linear_q_points_b = linear_q_points_b.view({3, no_heads, no_qk_points}).permute({1, 2, 0});
-    linear_kv_points_w = linear_kv_points_w.view({3, no_heads, (no_qk_points + no_v_points), c_s}).permute({1, 2, 0, 3});
+    linear_kv_points_w =
+        linear_kv_points_w.view({3, no_heads, (no_qk_points + no_v_points), c_s}).permute({1, 2, 0, 3});
     linear_kv_points_b = linear_kv_points_b.view({3, no_heads, (no_qk_points + no_v_points)}).permute({1, 2, 0});
-    
+
     auto float_opt = linear_q_w.options().device(kpex::device()).dtype(c10::kFloat);
     auto bf16_opt = linear_q_w.options().device(kpex::device()).dtype(c10::kBFloat16);
     this->linear_q_w = linear_q_w.to(bf16_opt).contiguous();
@@ -159,6 +167,5 @@ InvariantPointAttentionWeight::InvariantPointAttentionWeight(int64_t c_s, int64_
     this->head_weights = head_weights.to(float_opt).contiguous();
     this->linear_out_w = linear_out_w.to(bf16_opt).contiguous();
     this->linear_out_b = linear_out_b.to(float_opt).contiguous();
-
 }
-}
+} // namespace alphafold

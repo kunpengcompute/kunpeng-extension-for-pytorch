@@ -17,8 +17,11 @@
 
 namespace alphafold {
 struct kutacc_af2_attention_weights_t_wrapper : kutacc_af2_attention_weights_t {
-    kutacc_af2_attention_weights_t_wrapper(kutacc::TensorWrapper &query_w, kutacc::TensorWrapper &key_w, kutacc::TensorWrapper &value_w, kutacc::TensorWrapper &gating_w, 
-        kutacc::TensorWrapper &gating_b, kutacc::TensorWrapper &output_w, kutacc::TensorWrapper &output_b, int64_t nchannels, int64_t nheads, int64_t head_size)
+    kutacc_af2_attention_weights_t_wrapper(kutacc::TensorWrapper &query_w, kutacc::TensorWrapper &key_w,
+                                           kutacc::TensorWrapper &value_w, kutacc::TensorWrapper &gating_w,
+                                           kutacc::TensorWrapper &gating_b, kutacc::TensorWrapper &output_w,
+                                           kutacc::TensorWrapper &output_b, int64_t nchannels, int64_t nheads,
+                                           int64_t head_size)
     {
         this->nchannels = nchannels;
         this->nheads = nheads;
@@ -34,8 +37,9 @@ struct kutacc_af2_attention_weights_t_wrapper : kutacc_af2_attention_weights_t {
 };
 
 struct kutacc_af2_attention_inputs_t_wrapper : kutacc_af2_attention_inputs_t {
-    kutacc_af2_attention_inputs_t_wrapper(kutacc::TensorWrapper &q, kutacc::TensorWrapper &k, kutacc::TensorWrapper &v, kutacc::TensorWrapper &gate, kutacc::TensorWrapper &avg,
-        int64_t batch, int64_t seq_len)
+    kutacc_af2_attention_inputs_t_wrapper(kutacc::TensorWrapper &q, kutacc::TensorWrapper &k, kutacc::TensorWrapper &v,
+                                          kutacc::TensorWrapper &gate, kutacc::TensorWrapper &avg, int64_t batch,
+                                          int64_t seq_len)
     {
         this->batch = batch;
         this->seq_len = seq_len;
@@ -46,5 +50,5 @@ struct kutacc_af2_attention_inputs_t_wrapper : kutacc_af2_attention_inputs_t {
         this->avg = avg.get_tensor();
     }
 };
-}
+} // namespace alphafold
 #endif

@@ -33,18 +33,17 @@
 namespace py = pybind11;
 
 namespace kudnn {
-KuDNN::TensorInfo getKuDNNTensor(const at::Tensor& tensor);
+KuDNN::TensorInfo getKuDNNTensor(const at::Tensor &tensor);
 
-bool isValidateTensor(const at::Tensor& input);
+bool isValidateTensor(const at::Tensor &input);
 
-at::Tensor kudnn_linear(const at::Tensor& input, const at::Tensor& weight, const std::optional<at::Tensor>& bias);
+at::Tensor kudnn_linear(const at::Tensor &input, const at::Tensor &weight, const std::optional<at::Tensor> &bias);
 
-at::Tensor kudnn_conv2d(
-    const at::Tensor& input, const at::Tensor& weight, const std::optional<at::Tensor>& bias_opt,
-    py::object stride, py::object padding, py::object dilation, int64_t groups); // temporary remove C10::SymInt groups
+at::Tensor kudnn_conv2d(const at::Tensor &input, const at::Tensor &weight, const std::optional<at::Tensor> &bias_opt,
+                        py::object stride, py::object padding, py::object dilation,
+                        int64_t groups); // temporary remove C10::SymInt groups
 
-at::Tensor kudnn_conv3d(
-    const at::Tensor& input, const at::Tensor& weight, const std::optional<at::Tensor>& bias_opt,
-    py::object stride, py::object padding, py::object dilation, int64_t groups);
-}
+at::Tensor kudnn_conv3d(const at::Tensor &input, const at::Tensor &weight, const std::optional<at::Tensor> &bias_opt,
+                        py::object stride, py::object padding, py::object dilation, int64_t groups);
+} // namespace kudnn
 #endif

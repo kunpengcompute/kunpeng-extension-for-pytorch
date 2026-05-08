@@ -38,17 +38,19 @@ int64_t default_block_size(int64_t seq_len)
         return 32;
     }
 }
-}
+} // namespace
 
 GatingAttentionWeight::GatingAttentionWeight(at::Tensor &query_w, at::Tensor &key_w, at::Tensor &value_w,
-    at::Tensor &gating_w, at::Tensor &gating_b, at::Tensor &output_w, at::Tensor &output_b)
+                                             at::Tensor &gating_w, at::Tensor &gating_b, at::Tensor &output_w,
+                                             at::Tensor &output_b)
 {
     KPEX_CHECK(query_w.dim() == 3, "query_w's dim must be 3 dims");
     int64_t nchannels = query_w.sizes()[2];
     int64_t nheads = query_w.sizes()[0];
     int64_t head_size = query_w.sizes()[1];
-    KPEX_CHECK(nchannels > 0 && nheads > 0 && head_size > 0 && nchannels <= INT32_MAX && head_size <= INT32_MAX && nheads <= INT32_MAX
-        && nchannels == nheads * head_size, "invalid query_w shape [", nchannels, ", ", nheads, ", ", head_size, "]");
+    KPEX_CHECK(nchannels > 0 && nheads > 0 && head_size > 0 && nchannels <= INT32_MAX && head_size <= INT32_MAX &&
+                   nheads <= INT32_MAX && nchannels == nheads * head_size,
+               "invalid query_w shape [", nchannels, ", ", nheads, ", ", head_size, "]");
     KPEX_CHECK_TENSOR_SHAPE(key_w, nheads, head_size, nchannels);
     KPEX_CHECK_TENSOR_SHAPE(value_w, nheads, head_size, nchannels);
     KPEX_CHECK_TENSOR_SHAPE(gating_w, nheads, head_size, nchannels);
@@ -78,13 +80,13 @@ GatingAttentionWeight::GatingAttentionWeight(at::Tensor &query_w, at::Tensor &ke
     this->value_w = value_w_res;
     this->gating_w = gating_w_res;
     this->output_w = output_w_res;
-    
+
     this->gating_b = gating_b.to(float_opt).contiguous();
     this->output_b = output_b.to(float_opt).contiguous();
 }
 
 at::Tensor gating_attention(at::Tensor &q_data, at::Tensor &m_data, at::Tensor &bias, at::Tensor &nonbatched_bias,
-    const GatingAttentionWeight &weights, std::optional<int64_t> block_size)
+                            const GatingAttentionWeight &weights, std::optional<int64_t> block_size)
 {
     at::Tensor out = at::empty(q_data.sizes(), q_data.options());
     int64_t batch = q_data.sizes()[0];
@@ -137,17 +139,21 @@ at::Tensor gating_attention(at::Tensor &q_data, at::Tensor &m_data, at::Tensor &
     auto output_b_tw = convert_to_tensor_wrapper(weights.output_b);
     auto out_tw = convert_to_tensor_wrapper(out);
 
-    kutacc_af2_attention_weights_t_wrapper *gating_attention_weight_ptr = new kutacc_af2_attention_weights_t_wrapper(query_w_tw, key_w_tw, value_w_tw, gating_w_tw, gating_b_tw,
-        output_w_tw, output_b_tw, nchannels, nheads, head_size);
-    kutacc_af2_attention_inputs_t_wrapper *gating_attention_q_ptr = new kutacc_af2_attention_inputs_t_wrapper(q_tw, k_tw, v_tw, gate_tw, weighted_avg_tw, batch, seq_len);
+    kutacc_af2_attention_weights_t_wrapper *gating_attention_weight_ptr =
+        new kutacc_af2_attention_weights_t_wrapper(query_w_tw, key_w_tw, value_w_tw, gating_w_tw, gating_b_tw,
+                                                   output_w_tw, output_b_tw, nchannels, nheads, head_size);
+    kutacc_af2_attention_inputs_t_wrapper *gating_attention_q_ptr =
+        new kutacc_af2_attention_inputs_t_wrapper(q_tw, k_tw, v_tw, gate_tw, weighted_avg_tw, batch, seq_len);
 
-    if (unlikely(gating_attention_weight_ptr == nullptr|| gating_attention_q_ptr == nullptr)) {
+    if (unlikely(gating_attention_weight_ptr == nullptr || gating_attention_q_ptr == nullptr)) {
         return out;
     }
 
-    kutacc_af2_gating_attention(input_tw.get_tensor(), gating_attention_q_ptr, bias_tw.get_tensor(), nonbatched_bias_tw.get_tensor(), gating_attention_weight_ptr, out_tw.get_tensor(), block_size_);
+    kutacc_af2_gating_attention(input_tw.get_tensor(), gating_attention_q_ptr, bias_tw.get_tensor(),
+                                nonbatched_bias_tw.get_tensor(), gating_attention_weight_ptr, out_tw.get_tensor(),
+                                block_size_);
     delete gating_attention_weight_ptr;
     delete gating_attention_q_ptr;
     return out;
 }
-}   // namespace alphafold
+} // namespace alphafold

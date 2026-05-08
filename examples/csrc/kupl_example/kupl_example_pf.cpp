@@ -23,11 +23,8 @@ void test_kupl_parallel()
     std::cout << "test_kupl_parallel " << std::endl;
     int num_threads = kupl_get_num_executors();
     int tid = kupl_get_executor_num();
-    kpex::parallel(num_threads, [&](int tid) {
-        std::cout << "KUPL Thread " << tid << std::endl;
-    });
+    kpex::parallel(num_threads, [&](int tid) { std::cout << "KUPL Thread " << tid << std::endl; });
 }
-
 
 void test_kupl_parallel_for()
 {
@@ -50,9 +47,7 @@ void test_kupl_parallel_error()
     std::cout << "test_kupl_parallel " << std::endl;
     int num_threads = -2;
     int tid = kupl_get_executor_num();
-    kpex::parallel(num_threads, [&](int tid) {
-        std::cout << "KUPL Thread " << tid << std::endl;
-    });
+    kpex::parallel(num_threads, [&](int tid) { std::cout << "KUPL Thread " << tid << std::endl; });
 }
 
 void test_kupl_parallel_for_error()

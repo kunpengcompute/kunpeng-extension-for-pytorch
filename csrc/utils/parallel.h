@@ -18,11 +18,11 @@
 #include <iostream>
 #include "kupl.h"
 
-
 namespace kpex {
 namespace {
-inline int64_t divup(int64_t x, int64_t y) {
-  return (x + y - 1) / y;
+inline int64_t divup(int64_t x, int64_t y)
+{
+    return (x + y - 1) / y;
 }
 
 template <typename F>
@@ -30,43 +30,42 @@ struct parallel_for_function_args {
     int64_t begin;
     int64_t end;
     int64_t grain_size;
-    const F& f;
+    const F &f;
 };
 
 template <typename F>
 static void parallel_for_function(kupl_nd_range_t *nd_range, void *args, int tid, int tnum)
 {
     auto data = (parallel_for_function_args<F> *)args;
-    const F& f = data->f;
+    const F &f = data->f;
     f(nd_range->nd_range[0].lower, nd_range->nd_range[0].upper);
 }
 
 template <typename F>
 struct parallel_function_args {
-    const F& f;
+    const F &f;
 };
 
 template <typename F>
 static void parallel_function(kupl_nd_range_t *nd_range, void *args, int tid, int tnum)
 {
     auto data = (parallel_for_function_args<F> *)args;
-    const F& f = data->f;
+    const F &f = data->f;
     f(tid);
 }
-}
+} // namespace
 
 template <typename F>
-inline void parallel_for(int64_t begin, int64_t end, int64_t grain_size, const F& f) {
+inline void parallel_for(int64_t begin, int64_t end, int64_t grain_size, const F &f)
+{
     int num_executors = kupl_get_num_executors();
     kupl_nd_range_t range;
     KUPL_STRIDE_1D_RANGE_INIT(range, begin, end, 1, grain_size);
-    kupl_parallel_for_desc_t desc = {
-        .field_mask = KUPL_PARALLEL_FOR_DESC_FIELD_DEFAULT,
-        .range = &range,
-        .egroup = NULL,
-        .concurrency = num_executors,
-        .policy = KUPL_LOOP_POLICY_STATIC
-    };
+    kupl_parallel_for_desc_t desc = {.field_mask = KUPL_PARALLEL_FOR_DESC_FIELD_DEFAULT,
+                                     .range = &range,
+                                     .egroup = NULL,
+                                     .concurrency = num_executors,
+                                     .policy = KUPL_LOOP_POLICY_STATIC};
     parallel_for_function_args<F> args = {begin, end, grain_size, f};
     int ret = kupl_parallel_for(&desc, parallel_for_function<F>, &args);
     if (ret == KUPL_ERROR) {
@@ -75,14 +74,13 @@ inline void parallel_for(int64_t begin, int64_t end, int64_t grain_size, const F
 }
 
 template <typename F>
-inline void parallel(int num_threads, const F& f) {
-    kupl_parallel_for_desc_t desc = {
-        .field_mask = KUPL_PARALLEL_FOR_DESC_FIELD_DEFAULT,
-        .range = NULL,
-        .egroup = NULL,
-        .concurrency = num_threads,
-        .policy = KUPL_LOOP_POLICY_STATIC
-    };
+inline void parallel(int num_threads, const F &f)
+{
+    kupl_parallel_for_desc_t desc = {.field_mask = KUPL_PARALLEL_FOR_DESC_FIELD_DEFAULT,
+                                     .range = NULL,
+                                     .egroup = NULL,
+                                     .concurrency = num_threads,
+                                     .policy = KUPL_LOOP_POLICY_STATIC};
     parallel_function_args<F> args = {f};
     int ret = kupl_parallel_for(&desc, parallel_function<F>, &args);
     if (ret == KUPL_ERROR) {
@@ -90,6 +88,6 @@ inline void parallel(int num_threads, const F& f) {
     }
 }
 
-} // kpex
+} // namespace kpex
 
 #endif

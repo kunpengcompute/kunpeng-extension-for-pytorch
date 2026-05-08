@@ -26,6 +26,6 @@ static inline float to_float(__bf16 x)
 {
     return vcvtah_f32_bf16(x);
 }
-}   // namespace kpex
+} // namespace kpex
 
 #endif

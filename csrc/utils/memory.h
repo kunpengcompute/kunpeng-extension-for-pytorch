@@ -26,7 +26,8 @@ int kpex_posix_memalign(void **memptr, size_t alignment, size_t size);
 void kpex_free(void *ptr);
 
 namespace kpex {
-inline c10::Device device() {
+inline c10::Device device()
+{
     return c10::Device(c10::kCPU, (int)kpex_use_opm());
 }
 
@@ -39,12 +40,12 @@ struct KpexMallocDeleter {
 };
 
 template <typename T>
-inline std::unique_ptr<T[], KpexMallocDeleter<T> > alloc(int64_t size)
+inline std::unique_ptr<T[], KpexMallocDeleter<T>> alloc(int64_t size)
 {
     void *ptr;
     kpex_posix_memalign(&ptr, 64, size * sizeof(T));
-    return std::unique_ptr<T[], KpexMallocDeleter<T> >((T *)ptr);
+    return std::unique_ptr<T[], KpexMallocDeleter<T>>((T *)ptr);
 }
-}   // namespace kpex
+} // namespace kpex
 
 #endif

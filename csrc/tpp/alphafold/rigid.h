@@ -18,18 +18,18 @@
 #include "utils/check.h"
 
 namespace alphafold {
-    /**
+/**
      * @param rot_mats shape [..., 3, 3]
      * @param pts shape [..., 3]
      * @param trans [..., 3]
      * @return shape [..., 3]
      */
-    at::Tensor rigid_rot_vec_mul(at::Tensor &pts, at::Tensor &rot_mats, std::optional<at::Tensor> trans);
+at::Tensor rigid_rot_vec_mul(at::Tensor &pts, at::Tensor &rot_mats, std::optional<at::Tensor> trans);
 
-    /**
+/**
      * @param a shape [..., 3, 3]
      * @param b shape [..., 3, 3]
      * @return shape [..., 3, 3]
      */
-    at::Tensor rigid_rot_matmul(at::Tensor &a, at::Tensor &b);
-}
+at::Tensor rigid_rot_matmul(at::Tensor &a, at::Tensor &b);
+} // namespace alphafold

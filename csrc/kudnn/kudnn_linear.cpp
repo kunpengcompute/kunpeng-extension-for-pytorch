@@ -21,7 +21,8 @@
 #define LARGE_MATRIX_OPS 5e11
 
 namespace kudnn {
-inline KuDNN::Element::TypeT get_kudnn_element_type(at::ScalarType scalar_type) {
+inline KuDNN::Element::TypeT get_kudnn_element_type(at::ScalarType scalar_type)
+{
     static const std::unordered_map<at::ScalarType, KuDNN::Element::TypeT> linear_type_map = {
         {at::kFloat, KuDNN::Element::TypeT::F32},
         {at::kHalf, KuDNN::Element::TypeT::F16},
@@ -34,7 +35,8 @@ inline KuDNN::Element::TypeT get_kudnn_element_type(at::ScalarType scalar_type) 
     return it->second;
 }
 
-inline KuDNN::TensorInfo get_kudnn_linear_tensor(const at::Tensor& tensor) {
+inline KuDNN::TensorInfo get_kudnn_linear_tensor(const at::Tensor &tensor)
+{
     KuDNN::Shape shape(tensor.size(0), tensor.size(1));
     KuDNN::Element::TypeT type = get_kudnn_element_type(tensor.scalar_type());
     KuDNN::Layout layout = KuDNN::Layout::ROW_MAJOR;
@@ -42,26 +44,27 @@ inline KuDNN::TensorInfo get_kudnn_linear_tensor(const at::Tensor& tensor) {
 }
 
 // y = x @ weight^T + bias
-at::Tensor kudnn_linear(const at::Tensor& input, const at::Tensor& weight, const std::optional<at::Tensor>& bias) {
+at::Tensor kudnn_linear(const at::Tensor &input, const at::Tensor &weight, const std::optional<at::Tensor> &bias)
+{
     KPEX_CHECK(isValidateTensor(input), "input is not validate, unsupported");
     KPEX_CHECK(weight.dim() <= 2, "weight has more than 2 dimensions, unsupported");
     const auto input_dim = input.dim();
 
-    auto input_reshaped = (input_dim == 2) 
-        ? input
-        : input.view({-1, input.size(input_dim - 1)});
+    auto input_reshaped = (input_dim == 2) ? input : input.view({-1, input.size(input_dim - 1)});
     const int64_t m = input_reshaped.size(0);
-    const int64_t k = input_reshaped.size(1); 
-    const int64_t n = weight.size(0);      
+    const int64_t k = input_reshaped.size(1);
+    const int64_t n = weight.size(0);
     const uint64_t total_ops = bias.has_value() ? (2ULL * k + 1ULL) * m * n : 2ULL * m * k * n; // total ops ≈ 2×m×k×n
 
     int num_threads = 1;
     if (total_ops > MICRO_MATRIX_OPS && total_ops <= MIN_MATRIX_OPS) {
-        num_threads = 4; // small size matrix (num of ops less than 100 m):using 4 thread to avoid overhead of multi-threading
+        num_threads =
+            4; // small size matrix (num of ops less than 100 m):using 4 thread to avoid overhead of multi-threading
     } else if (total_ops > MIN_MATRIX_OPS && total_ops <= MIN_TO_MID_MATRIX_OPS) {
         num_threads = 9; // num of ops less than 1 billion, use 9 threads to enhance parallel performance
     } else if (total_ops > MIN_TO_MID_MATRIX_OPS && total_ops <= MID_MATRIX_OPS) {
-        num_threads = 18; // medium matrix size (ops is bigger than 1 billion, less than 10 billion), computional density increase
+        num_threads =
+            18; // medium matrix size (ops is bigger than 1 billion, less than 10 billion), computional density increase
     } else if (total_ops > MID_MATRIX_OPS && total_ops <= LARGE_MATRIX_OPS) {
         num_threads = 27; // computional density increase more
     } else if (total_ops > LARGE_MATRIX_OPS) {
@@ -69,7 +72,7 @@ at::Tensor kudnn_linear(const at::Tensor& input, const at::Tensor& weight, const
     }
 
     c10::MaybeOwned<at::Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias);
-    const at::Tensor& bias_new = *bias_maybe_owned;
+    const at::Tensor &bias_new = *bias_maybe_owned;
 
     const std::vector<int64_t> out_sizes_vec = {input_reshaped.size(0), weight.size(0)};
 
@@ -90,7 +93,8 @@ at::Tensor kudnn_linear(const at::Tensor& input, const at::Tensor& weight, const
         KuDNN::TensorInfo bias_tensorInfo = {bias_shape, bias_kudnn_type, KuDNN::Layout::AB, bias_stride};
 
         KuDNN::Gemm gemmLayer(input_tensorInfo, weight_tensorInfo, out_tensorInfo, bias_tensorInfo, num_threads);
-        gemmLayer.Run(input_reshaped.data_ptr(), weight.data_ptr(), out.data_ptr(), bias_new.data_ptr(), 1.0f, 0.0f, num_threads);
+        gemmLayer.Run(input_reshaped.data_ptr(), weight.data_ptr(), out.data_ptr(), bias_new.data_ptr(), 1.0f, 0.0f,
+                      num_threads);
     } else {
         KuDNN::Gemm gemmLayer(input_tensorInfo, weight_tensorInfo, out_tensorInfo, num_threads);
         gemmLayer.Run(input_reshaped.data_ptr(), weight.data_ptr(), out.data_ptr(), 1.0f, 0.0f, num_threads);

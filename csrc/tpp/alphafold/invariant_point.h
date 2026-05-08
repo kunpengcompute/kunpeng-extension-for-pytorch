@@ -45,15 +45,17 @@ struct InvariantPointAttentionWeight {
     at::Tensor linear_out_b;
 
     InvariantPointAttentionWeight(int64_t c_s, int64_t c_z, int64_t c_hidden, int64_t no_heads, int64_t no_qk_points,
-        int64_t no_v_points, at::Tensor &linear_q_w, at::Tensor &linear_q_b, at::Tensor &linear_kv_w, at::Tensor linear_kv_b,
-        at::Tensor &linear_q_points_w, at::Tensor &linear_q_points_b, at::Tensor &linear_kv_points_w, at::Tensor &linear_kv_points_b,
-        at::Tensor &linear_b_w, at::Tensor &linear_b_b, at::Tensor &head_weights, at::Tensor &linear_out_w, at::Tensor &linear_out_b);
+                                  int64_t no_v_points, at::Tensor &linear_q_w, at::Tensor &linear_q_b,
+                                  at::Tensor &linear_kv_w, at::Tensor linear_kv_b, at::Tensor &linear_q_points_w,
+                                  at::Tensor &linear_q_points_b, at::Tensor &linear_kv_points_w,
+                                  at::Tensor &linear_kv_points_b, at::Tensor &linear_b_w, at::Tensor &linear_b_b,
+                                  at::Tensor &head_weights, at::Tensor &linear_out_w, at::Tensor &linear_out_b);
 };
 
 struct kutacc_af2_ipa_weights_t_wrapper : kutacc_af2_ipa_weights_t {
-    kutacc_af2_ipa_weights_t_wrapper(kutacc::TensorWrapper &head_weights, kutacc::TensorWrapper &weights_head_weights, 
-        kutacc::TensorWrapper &linear_b_w, kutacc::TensorWrapper &linear_b_b, int64_t c_z, int64_t c_hidden,
-        int64_t no_heads, int64_t no_qk_points, int64_t no_v_points)
+    kutacc_af2_ipa_weights_t_wrapper(kutacc::TensorWrapper &head_weights, kutacc::TensorWrapper &weights_head_weights,
+                                     kutacc::TensorWrapper &linear_b_w, kutacc::TensorWrapper &linear_b_b, int64_t c_z,
+                                     int64_t c_hidden, int64_t no_heads, int64_t no_qk_points, int64_t no_v_points)
     {
         this->head_weights = head_weights.get_tensor();
         this->weights_head_weights = weights_head_weights.get_tensor();
@@ -68,8 +70,9 @@ struct kutacc_af2_ipa_weights_t_wrapper : kutacc_af2_ipa_weights_t {
 };
 
 struct kutacc_af2_ipa_s_inputs_t_wrapper : kutacc_af2_ipa_s_inputs_t {
-    kutacc_af2_ipa_s_inputs_t_wrapper(kutacc::TensorWrapper &a, kutacc::TensorWrapper &b, kutacc::TensorWrapper &q, kutacc::TensorWrapper &k,
-        kutacc::TensorWrapper &v, kutacc::TensorWrapper &q_pts, kutacc::TensorWrapper &k_pts, kutacc::TensorWrapper &v_pts, int64_t n_res) 
+    kutacc_af2_ipa_s_inputs_t_wrapper(kutacc::TensorWrapper &a, kutacc::TensorWrapper &b, kutacc::TensorWrapper &q,
+                                      kutacc::TensorWrapper &k, kutacc::TensorWrapper &v, kutacc::TensorWrapper &q_pts,
+                                      kutacc::TensorWrapper &k_pts, kutacc::TensorWrapper &v_pts, int64_t n_res)
     {
         this->a = a.get_tensor();
         this->b = b.get_tensor();
@@ -84,7 +87,8 @@ struct kutacc_af2_ipa_s_inputs_t_wrapper : kutacc_af2_ipa_s_inputs_t {
 };
 
 struct kutacc_af2_ipa_o_inputs_t_wrapper : kutacc_af2_ipa_o_inputs_t {
-    kutacc_af2_ipa_o_inputs_t_wrapper(kutacc::TensorWrapper &o, kutacc::TensorWrapper &o_pt, kutacc::TensorWrapper &o_pt_norm, kutacc::TensorWrapper &o_pair)
+    kutacc_af2_ipa_o_inputs_t_wrapper(kutacc::TensorWrapper &o, kutacc::TensorWrapper &o_pt,
+                                      kutacc::TensorWrapper &o_pt_norm, kutacc::TensorWrapper &o_pair)
     {
         this->o = o.get_tensor();
         this->o_pt = o_pt.get_tensor();
@@ -92,15 +96,15 @@ struct kutacc_af2_ipa_o_inputs_t_wrapper : kutacc_af2_ipa_o_inputs_t {
         this->o_pair = o_pair.get_tensor();
     }
 };
-    /**
+/**
      * @param s [n_res, c_s]
      * @param z [n_res, n_res, c_z]
      * @param rigid_trans [n_res, 3]
      * @param rigid_rot_mats [n_res, 3, 3]
      * @param mask [n_res]
      */
-    at::Tensor invariant_point_attention(at::Tensor &s, at::Tensor &z, at::Tensor &rigid_trans, at::Tensor &rigid_rot_mats, 
-        at::Tensor &mask, const InvariantPointAttentionWeight &weights);
-}
+at::Tensor invariant_point_attention(at::Tensor &s, at::Tensor &z, at::Tensor &rigid_trans, at::Tensor &rigid_rot_mats,
+                                     at::Tensor &mask, const InvariantPointAttentionWeight &weights);
+} // namespace alphafold
 
 #endif
