@@ -34,7 +34,7 @@ namespace alphafold {
  * act.dim >= 2 weight.dim >= 2
  */
 inline at::Tensor linear(const at::Tensor &act, const at::Tensor &weight, std::optional<at::Tensor> bias,
-    std::optional<at::Tensor> result_ = std::nullopt)
+                         std::optional<at::Tensor> result_ = std::nullopt)
 {
     KPEX_CHECK(act.dim() >= 2, act.dim());
     KPEX_CHECK(weight.dim() >= 2, weight.dim());
@@ -69,6 +69,6 @@ inline at::Tensor linear(const at::Tensor &act, const at::Tensor &weight, std::o
         return result;
     }
 }
-}
+} // namespace alphafold
 
 #endif

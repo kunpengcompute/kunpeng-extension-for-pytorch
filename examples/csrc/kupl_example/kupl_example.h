@@ -22,6 +22,6 @@ void test_kupl_parallel_for();
 void test_kupl_parallel_error();
 void test_kupl_parallel_for_error();
 
-}   // namespace kupl_example
+} // namespace kupl_example
 
 #endif

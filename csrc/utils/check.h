@@ -24,8 +24,7 @@
 
 namespace kpex {
 namespace internal {
-inline void check_fail_print(std::stringstream &stream)
-{}
+inline void check_fail_print(std::stringstream &stream) {}
 
 template <typename Arg, typename... Rest>
 inline void check_fail_print(std::stringstream &stream, Arg &&arg, Rest &&...rest)
@@ -44,10 +43,10 @@ inline void check_fail(std::string func, std::string file, int line, Args &&...a
     std::cerr << stream.str();
     abort();
 }
-}   //namespace internal
-}   //namespace kpex
+} //namespace internal
+} //namespace kpex
 
-#define KPEX_CHECK(condition, ...)                                                  \
+#define KPEX_CHECK(condition, ...)                                                 \
     do {                                                                           \
         if (__builtin_expect(!(condition), 0)) {                                   \
             kpex::internal::check_fail(__func__, __FILE__, __LINE__, __VA_ARGS__); \
@@ -56,11 +55,11 @@ inline void check_fail(std::string func, std::string file, int line, Args &&...a
 
 #define KPEX_CHECK_TENSOR_SHAPE(tensor, ...)                                                                    \
     KPEX_CHECK((tensor).sizes() == c10::IntArrayRef({__VA_ARGS__}), "invalid tensor shape: ", (tensor).sizes(), \
-        ", expect: ", c10::IntArrayRef({__VA_ARGS__}))
+               ", expect: ", c10::IntArrayRef({__VA_ARGS__}))
 
 #define KPEX_CHECK_TENSORWRAPPER_SHAPE(tensor, ...)                                 \
     KPEX_CHECK(c10::IntArrayRef((tensor).sizes) == c10::IntArrayRef({__VA_ARGS__}), \
-        "invalid tensor wrapper shape: ", c10::IntArrayRef((tensor).sizes),        \
-        ", expect: ", c10::IntArrayRef({__VA_ARGS__}))
+               "invalid tensor wrapper shape: ", c10::IntArrayRef((tensor).sizes),  \
+               ", expect: ", c10::IntArrayRef({__VA_ARGS__}))
 
 #endif

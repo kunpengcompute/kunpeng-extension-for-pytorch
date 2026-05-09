@@ -26,6 +26,6 @@ inline void bind(pybind11::module &m)
     submodule.def("test_kupl_parallel_error", &test_kupl_parallel_error);
     submodule.def("test_kupl_parallel_for_error", &test_kupl_parallel_for_error);
 }
-}
+} // namespace kupl_example
 
 #endif

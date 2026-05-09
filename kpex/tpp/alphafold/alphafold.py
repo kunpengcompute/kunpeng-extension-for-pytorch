@@ -151,7 +151,7 @@ def invariant_point_forward(self, s, z, r, mask):
         self.kpex_weights,
     )
     return out
-        
+
 def triangleMultiplication_forward(self, act, mask):
     if not hasattr(self, "kpex_weights"):
         self.kpex_weights = kernel.alphafold.TriangleMultiplicationWeight(
@@ -570,11 +570,11 @@ def triangle_attention_out_gather(pair_act_col):
 def kpex_alphafold(model, model_config, dtype=torch.float):
     new_model = copy.deepcopy(model)
     evoformer = new_model.model.impl.evoformer
-    
+
     if hasattr(evoformer, "extra_msa_stack"):
         for block in evoformer.extra_msa_stack:
             block.msa_row_attention_with_pair_bias.attention.forward = types.MethodType(
-                gating_attention_forward, 
+                gating_attention_forward,
                 block.msa_row_attention_with_pair_bias.attention
                 )
             block.msa_column_global_attention.attention.forward = types.MethodType(
@@ -582,44 +582,44 @@ def kpex_alphafold(model, model_config, dtype=torch.float):
                 block.msa_column_global_attention.attention
             )
             block.triangle_attention_starting_node.attention.forward = types.MethodType(
-                gating_attention_forward, 
+                gating_attention_forward,
                 block.triangle_attention_starting_node.attention
                 )
             block.triangle_attention_ending_node.attention.forward = types.MethodType(
-                gating_attention_forward, 
+                gating_attention_forward,
                 block.triangle_attention_ending_node.attention
                 )
             block.outer_product_mean.forward = types.MethodType(
-                outer_product_mean_forward, 
+                outer_product_mean_forward,
                 block.outer_product_mean
                 )
             block.msa_transition.forward = types.MethodType(
-                transition_forward, 
+                transition_forward,
                 block.msa_transition
                 )
             block.pair_transition.forward = types.MethodType(
-                transition_forward, 
+                transition_forward,
                 block.pair_transition
                 )
-            
+
             block.msa_row_attention_with_pair_bias.forward = types.MethodType(
-                MSARowAttentionWithPairBias_forward, 
+                MSARowAttentionWithPairBias_forward,
                 block.msa_row_attention_with_pair_bias
                 )
             block.triangle_attention_starting_node.forward = types.MethodType(
-                TriangleAttention_forward, 
+                TriangleAttention_forward,
                 block.triangle_attention_starting_node
                 )
             block.triangle_attention_ending_node.forward = types.MethodType(
-                TriangleAttention_forward, 
+                TriangleAttention_forward,
                 block.triangle_attention_ending_node
                 )
             block.msa_column_global_attention.forward = types.MethodType(
-                MSAColumnGlobalAttention_forward, 
+                MSAColumnGlobalAttention_forward,
                 block.msa_column_global_attention
                 )
             block.forward = types.MethodType(
-                ExtraEvoformerIteration_forward, 
+                ExtraEvoformerIteration_forward,
                 block
                 )
             block.triangle_multiplication_outgoing.forward = types.MethodType(
@@ -633,52 +633,52 @@ def kpex_alphafold(model, model_config, dtype=torch.float):
     if hasattr(evoformer, "evoformer_iteration"):
         for block in evoformer.evoformer_iteration:
             block.msa_row_attention_with_pair_bias.attention.forward = types.MethodType(
-                gating_attention_forward, 
+                gating_attention_forward,
                 block.msa_row_attention_with_pair_bias.attention
                 )
             block.msa_column_attention.attention.forward = types.MethodType(
-                gating_attention_forward, 
+                gating_attention_forward,
                 block.msa_column_attention.attention
                 )
             block.triangle_attention_starting_node.attention.forward = types.MethodType(
-                gating_attention_forward, 
+                gating_attention_forward,
                 block.triangle_attention_starting_node.attention
                 )
             block.triangle_attention_ending_node.attention.forward = types.MethodType(
-                gating_attention_forward, 
+                gating_attention_forward,
                 block.triangle_attention_ending_node.attention
                 )
             block.outer_product_mean.forward = types.MethodType(
-                outer_product_mean_forward, 
+                outer_product_mean_forward,
                 block.outer_product_mean
                 )
             block.msa_transition.forward = types.MethodType(
-                transition_forward, 
+                transition_forward,
                 block.msa_transition
                 )
             block.pair_transition.forward = types.MethodType(
-                transition_forward, 
+                transition_forward,
                 block.pair_transition
                 )
-            
+
             block.msa_row_attention_with_pair_bias.forward = types.MethodType(
-                MSARowAttentionWithPairBias_forward, 
+                MSARowAttentionWithPairBias_forward,
                 block.msa_row_attention_with_pair_bias
                 )
             block.triangle_attention_starting_node.forward = types.MethodType(
-                TriangleAttention_forward, 
+                TriangleAttention_forward,
                 block.triangle_attention_starting_node
                 )
             block.triangle_attention_ending_node.forward = types.MethodType(
-                TriangleAttention_forward, 
+                TriangleAttention_forward,
                 block.triangle_attention_ending_node
                 )
             block.msa_column_attention.forward = types.MethodType(
-                MSAColumnAttention_forward, 
+                MSAColumnAttention_forward,
                 block.msa_column_attention
                 )
             block.forward = types.MethodType(
-                NoExtraEvoformerIteration_forward, 
+                NoExtraEvoformerIteration_forward,
                 block
                 )
             block.triangle_multiplication_outgoing.forward = types.MethodType(
@@ -693,28 +693,28 @@ def kpex_alphafold(model, model_config, dtype=torch.float):
         template_pair_sub_stack = evoformer.template_embedding.single_template_embedding.template_pair_stack.template_pair_sub_stack
         for block in template_pair_sub_stack:
             block.triangle_attention_starting_node.attention.forward = types.MethodType(
-                gating_attention_forward, 
+                gating_attention_forward,
                 block.triangle_attention_starting_node.attention
                 )
             block.triangle_attention_ending_node.attention.forward = types.MethodType(
-                gating_attention_forward, 
+                gating_attention_forward,
                 block.triangle_attention_ending_node.attention
                 )
             block.pair_transition.forward = types.MethodType(
-                transition_forward, 
+                transition_forward,
                 block.pair_transition
                 )
-            
+
             block.triangle_attention_starting_node.forward = types.MethodType(
-                TriangleAttention_forward, 
+                TriangleAttention_forward,
                 block.triangle_attention_starting_node
                 )
             block.triangle_attention_ending_node.forward = types.MethodType(
-                TriangleAttention_forward, 
+                TriangleAttention_forward,
                 block.triangle_attention_ending_node
                 )
             block.forward = types.MethodType(
-                TemplatePairSubStack_forward, 
+                TemplatePairSubStack_forward,
                 block
                 )
             block.triangle_multiplication_outgoing.forward = types.MethodType(
@@ -728,7 +728,7 @@ def kpex_alphafold(model, model_config, dtype=torch.float):
 
     structure_model = new_model.model.impl.structure_module.model
     structure_model.ipa.forward = types.MethodType(
-        invariant_point_forward, 
+        invariant_point_forward,
         structure_model.ipa
         )
 

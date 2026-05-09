@@ -18,19 +18,14 @@
 #include <memory.h>
 #include "kutacc.h"
 
-inline kutacc::TensorWrapper convert_to_tensor_wrapper(at::Tensor &tensor) {
+inline kutacc::TensorWrapper convert_to_tensor_wrapper(at::Tensor &tensor)
+{
     kutacc::DType dtype = kutacc::kInt64;
     auto scalar_type = tensor.scalar_type();
     if (scalar_type == at::kBFloat16) {
         dtype = kutacc::kBF16;
     }
-    return kutacc::TensorWrapper(
-        tensor.data_ptr(), 
-        tensor.sizes().vec(),
-        tensor.strides().vec(),
-        tensor.dim(),
-        dtype
-    );
+    return kutacc::TensorWrapper(tensor.data_ptr(), tensor.sizes().vec(), tensor.strides().vec(), tensor.dim(), dtype);
 }
 
 inline const kutacc::TensorWrapper convert_to_tensor_wrapper(const at::Tensor &tensor)
@@ -40,16 +35,11 @@ inline const kutacc::TensorWrapper convert_to_tensor_wrapper(const at::Tensor &t
     if (scalar_type == at::kBFloat16) {
         dtype = kutacc::kBF16;
     }
-    return kutacc::TensorWrapper(
-        tensor.data_ptr(), 
-        tensor.sizes().vec(),
-        tensor.strides().vec(),
-        tensor.dim(),
-        dtype
-    );
+    return kutacc::TensorWrapper(tensor.data_ptr(), tensor.sizes().vec(), tensor.strides().vec(), tensor.dim(), dtype);
 }
 
-inline kutacc::TensorWrapper convert_to_tensor_wrapper_comm(at::Tensor &tensor) {
+inline kutacc::TensorWrapper convert_to_tensor_wrapper_comm(at::Tensor &tensor)
+{
     int64_t scalar_size = c10::elementSize(tensor.scalar_type());
     kutacc::DType dtype = kutacc::kInt64;
     auto scalar_type = tensor.scalar_type();
@@ -57,12 +47,8 @@ inline kutacc::TensorWrapper convert_to_tensor_wrapper_comm(at::Tensor &tensor) 
         dtype = kutacc::kBF16;
     }
     return kutacc::TensorWrapper(
-        tensor.data_ptr(), 
-        {tensor.sizes()[0], tensor.sizes()[1], tensor.sizes()[2] * scalar_size},
-        {tensor.strides()[0] * scalar_size, tensor.strides()[1] * scalar_size, 1},
-        tensor.dim(),
-        dtype
-    );
+        tensor.data_ptr(), {tensor.sizes()[0], tensor.sizes()[1], tensor.sizes()[2] * scalar_size},
+        {tensor.strides()[0] * scalar_size, tensor.strides()[1] * scalar_size, 1}, tensor.dim(), dtype);
 }
 
 inline const kutacc::TensorWrapper convert_to_tensor_wrapper_comm(const at::Tensor &tensor)
@@ -74,12 +60,8 @@ inline const kutacc::TensorWrapper convert_to_tensor_wrapper_comm(const at::Tens
         dtype = kutacc::kBF16;
     }
     return kutacc::TensorWrapper(
-        tensor.data_ptr(), 
-        {tensor.sizes()[0], tensor.sizes()[1], tensor.sizes()[2] * scalar_size},
-        {tensor.strides()[0] * scalar_size, tensor.strides()[1] * scalar_size, 1},
-        tensor.dim(),
-        dtype
-    );
+        tensor.data_ptr(), {tensor.sizes()[0], tensor.sizes()[1], tensor.sizes()[2] * scalar_size},
+        {tensor.strides()[0] * scalar_size, tensor.strides()[1] * scalar_size, 1}, tensor.dim(), dtype);
 }
 
 inline at::Tensor linear_weight_prepack(const at::Tensor &weight, int64_t num_threads = 0)

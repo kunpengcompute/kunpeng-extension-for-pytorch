@@ -15,22 +15,17 @@
 namespace kudnn {
 
 static const std::unordered_map<at::ScalarType, KuDNN::Element::TypeT> type_map = {
-    {at::kFloat, KuDNN::Element::TypeT::F32},
-    {at::kBFloat16, KuDNN::Element::TypeT::BF16},
-    {at::kHalf, KuDNN::Element::TypeT::F16},
-    {at::kChar, KuDNN::Element::TypeT::S8},
+    {at::kFloat, KuDNN::Element::TypeT::F32}, {at::kBFloat16, KuDNN::Element::TypeT::BF16},
+    {at::kHalf, KuDNN::Element::TypeT::F16},  {at::kChar, KuDNN::Element::TypeT::S8},
     {at::kInt, KuDNN::Element::TypeT::S32},
 };
 
 static const std::unordered_map<int, KuDNN::Layout> dim_to_layout_map = {
-    {1, KuDNN::Layout::A},
-    {2, KuDNN::Layout::AB},
-    {3, KuDNN::Layout::ABC},
-    {4, KuDNN::Layout::ABCD},
-    {5, KuDNN::Layout::ABCDE},
+    {1, KuDNN::Layout::A},    {2, KuDNN::Layout::AB},    {3, KuDNN::Layout::ABC},
+    {4, KuDNN::Layout::ABCD}, {5, KuDNN::Layout::ABCDE},
 };
 
-KuDNN::TensorInfo getKuDNNTensor(const at::Tensor& tensor)
+KuDNN::TensorInfo getKuDNNTensor(const at::Tensor &tensor)
 {
     auto sizes = tensor.sizes();
     KuDNN::Shape shape(sizes.data(), sizes.size());
@@ -41,7 +36,7 @@ KuDNN::TensorInfo getKuDNNTensor(const at::Tensor& tensor)
     return KuDNN::TensorInfo(shape, type, layout);
 }
 
-bool isKuDNNDTypeUnSupported(const at::Tensor& tensor)
+bool isKuDNNDTypeUnSupported(const at::Tensor &tensor)
 {
     auto dtype = tensor.scalar_type();
     auto it = type_map.find(dtype);
@@ -52,7 +47,7 @@ bool isKuDNNDTypeUnSupported(const at::Tensor& tensor)
     return false;
 }
 
-bool isKuDNNLayoutUnSupported(const at::Tensor& tensor)
+bool isKuDNNLayoutUnSupported(const at::Tensor &tensor)
 {
     // check is dense
     if (unlikely(tensor.layout() != c10::kStrided)) {
@@ -69,7 +64,7 @@ bool isKuDNNLayoutUnSupported(const at::Tensor& tensor)
     return false;
 }
 
-bool isKuDNNShapeUnSupported(const at::Tensor& tensor)
+bool isKuDNNShapeUnSupported(const at::Tensor &tensor)
 {
     if (unlikely(tensor.dim() < 0 || tensor.dim() > 5)) {
         std::cout << "shape not supported" << std::endl;
@@ -77,8 +72,8 @@ bool isKuDNNShapeUnSupported(const at::Tensor& tensor)
     }
     return false;
 }
-        
-bool isTensorEmpty(const at::Tensor& tensor)
+
+bool isTensorEmpty(const at::Tensor &tensor)
 {
     if (unlikely(tensor.numel() == 0)) {
         std::cout << "tensor is empty" << std::endl;
@@ -87,7 +82,7 @@ bool isTensorEmpty(const at::Tensor& tensor)
     return false;
 }
 
-bool isNestedTensor(const at::Tensor& input)
+bool isNestedTensor(const at::Tensor &input)
 {
     if (unlikely(input.is_nested())) {
         std::cout << "tensor is nested" << std::endl;
@@ -96,7 +91,7 @@ bool isNestedTensor(const at::Tensor& input)
     return false;
 }
 
-bool isNotContiguousTensor(const at::Tensor& input)
+bool isNotContiguousTensor(const at::Tensor &input)
 {
     if (unlikely(!input.is_contiguous())) {
         std::cout << "tensor is not contiguous" << std::endl;
@@ -105,10 +100,10 @@ bool isNotContiguousTensor(const at::Tensor& input)
     return false;
 }
 
-bool isValidateTensor(const at::Tensor& input)
+bool isValidateTensor(const at::Tensor &input)
 {
-    if (unlikely(isKuDNNDTypeUnSupported(input) || isKuDNNLayoutUnSupported(input) || isTensorEmpty(input)
-        || isNestedTensor(input) || isKuDNNShapeUnSupported(input) || isNotContiguousTensor(input))) {
+    if (unlikely(isKuDNNDTypeUnSupported(input) || isKuDNNLayoutUnSupported(input) || isTensorEmpty(input) ||
+                 isNestedTensor(input) || isKuDNNShapeUnSupported(input) || isNotContiguousTensor(input))) {
         return false;
     }
     return true;

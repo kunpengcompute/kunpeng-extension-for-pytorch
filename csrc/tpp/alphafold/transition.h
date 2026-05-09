@@ -37,12 +37,14 @@ struct TransitionWeight {
     * @param linear2_w shape [c_o, c_i]
     * @param linear2_b shape [c_o]
     */
-    TransitionWeight(at::Tensor &input_ln_w,at::Tensor &input_ln_b, at::Tensor &linear1_w, at::Tensor &linear1_b,
-        at::Tensor &linear2_w, at::Tensor &linear2_b);
+    TransitionWeight(at::Tensor &input_ln_w, at::Tensor &input_ln_b, at::Tensor &linear1_w, at::Tensor &linear1_b,
+                     at::Tensor &linear2_w, at::Tensor &linear2_b);
 };
 
 struct kutacc_af2_trans_weights_t_wrapper : kutacc_af2_trans_weights_t {
-    kutacc_af2_trans_weights_t_wrapper(kutacc::TensorWrapper &linear1_w, kutacc::TensorWrapper &linear1_b, kutacc::TensorWrapper &linear2_w, kutacc::TensorWrapper &linear2_b, int64_t c_o, int64_t c_i)
+    kutacc_af2_trans_weights_t_wrapper(kutacc::TensorWrapper &linear1_w, kutacc::TensorWrapper &linear1_b,
+                                       kutacc::TensorWrapper &linear2_w, kutacc::TensorWrapper &linear2_b, int64_t c_o,
+                                       int64_t c_i)
     {
         this->linear1_w = linear1_w.get_tensor();
         this->linear1_b = linear1_b.get_tensor();
@@ -54,10 +56,11 @@ struct kutacc_af2_trans_weights_t_wrapper : kutacc_af2_trans_weights_t {
 };
 
 struct kutacc_af2_trans_act_inputs_t_wrapper : kutacc_af2_trans_act_inputs_t {
-    kutacc_af2_trans_act_inputs_t_wrapper(kutacc::TensorWrapper &input_act, kutacc::TensorWrapper &intermediate_act, int64_t batch, int64_t n_res)
+    kutacc_af2_trans_act_inputs_t_wrapper(kutacc::TensorWrapper &input_act, kutacc::TensorWrapper &intermediate_act,
+                                          int64_t batch, int64_t n_res)
     {
         this->input_act = input_act.get_tensor();
-        this->intermediate_act= intermediate_act.get_tensor();
+        this->intermediate_act = intermediate_act.get_tensor();
         this->batch = batch;
         this->n_res = n_res;
     }
@@ -68,6 +71,6 @@ struct kutacc_af2_trans_act_inputs_t_wrapper : kutacc_af2_trans_act_inputs_t {
  * @return shape [batch, n_res, c_o]
  */
 at::Tensor transition(at::Tensor &act, const TransitionWeight &weights);
-}
+} // namespace alphafold
 
 #endif

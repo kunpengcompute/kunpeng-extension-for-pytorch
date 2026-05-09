@@ -18,7 +18,8 @@
 #include <memkind.h>
 #endif
 
-bool kpex_use_opm() {
+bool kpex_use_opm()
+{
 #ifdef USE_OPM
     return true;
 #else
