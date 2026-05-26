@@ -10,9 +10,12 @@
 # See the Mulan PSL v2 for more details.
 #
 
-from . import tpp
-from .frontend import optimize
 import torch
-from . import _C
-from . import _inductor
-from . import _meta_reg
+from torch._dynamo.backends.registry import register_backend
+from .kpex_compile import kpex_compile
+
+# Register kpex as a backend compiler
+@register_backend
+def kpex(gm: torch.fx.GraphModule, example_inputs):
+    print("KPEX internal backend is enabled")
+    return kpex_compile(gm, example_inputs)

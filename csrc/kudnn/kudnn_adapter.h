@@ -10,8 +10,8 @@
  * See the Mulan PSL v2 for more details.
  */
 
-#ifndef KPEX_KUDNN_ADAPTER_H
-#define KPEX_KUDNN_ADAPTER_H
+#ifndef KPEX_KuDNN_ADAPTER_H
+#define KPEX_KuDNN_ADAPTER_H
 
 #include "kudnn.hpp"
 #include <ATen/ATen.h>

@@ -10,8 +10,8 @@
  * See the Mulan PSL v2 for more details.
  */
 
-#ifndef KPEX_KUDNN_BIND_H
-#define KPEX_KUDNN_BIND_H
+#ifndef KPEX_KuDNN_BIND_H
+#define KPEX_KuDNN_BIND_H
 
 #include <torch/extension.h>
 #include "kudnn_adapter.h"
