@@ -25,7 +25,8 @@ sources = [
     "csrc/comm/*.cpp",
     "csrc/comm/local/*.cpp",
     "csrc/tpp/alphafold/*.cpp",
-    "csrc/kudnn/*.cpp"
+    "csrc/kudnn/*.cpp",
+    "csrc/cpu/aten/*.cpp"
 ]
 
 sources_example = [
