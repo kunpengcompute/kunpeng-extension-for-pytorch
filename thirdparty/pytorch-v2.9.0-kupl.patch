@@ -1,0 +1,141 @@
+diff --git a/aten/src/ATen/ParallelOpenMP.cpp b/aten/src/ATen/ParallelOpenMP.cpp
+index f1ce7d9..ec036c7 100644
+--- a/aten/src/ATen/ParallelOpenMP.cpp
++++ b/aten/src/ATen/ParallelOpenMP.cpp
+@@ -28,7 +28,7 @@ thread_local int this_thread_id{0};
+ void init_num_threads() {
+   auto nthreads = num_threads.load();
+   if (nthreads > 0) {
+-    set_num_threads(nthreads);
++    // set_num_threads(nthreads);
+   } else {
+ #if defined(_OPENMP) && AT_MKL_ENABLED() && !AT_MKL_SEQUENTIAL()
+     // If we are using MKL an OpenMP make sure the number of threads match.
+@@ -62,6 +62,7 @@ void set_num_threads(int nthreads) {
+   // because PyTorch uses caffe2::pthreadpool() in QNNPACK
+   caffe2::PThreadPool* const pool = caffe2::pthreadpool(nthreads);
+   TORCH_INTERNAL_ASSERT(pool, "Invalid thread pool!");
++  nthreads = 0;
+ #endif
+ #if AT_MKLDNN_ENABLED()
+   at::native::mkldnn::clear_computation_cache();
+@@ -93,7 +94,8 @@ void set_thread_num(int id) {
+ 
+ bool in_parallel_region() {
+ #ifdef _OPENMP
+-  return omp_in_parallel();
++  return false;
++  // return omp_in_parallel();
+ #else
+   return false;
+ #endif
+diff --git a/aten/src/ATen/ParallelOpenMP.h b/aten/src/ATen/ParallelOpenMP.h
+index 84e744b..f7119f3 100644
+--- a/aten/src/ATen/ParallelOpenMP.h
++++ b/aten/src/ATen/ParallelOpenMP.h
+@@ -4,16 +4,49 @@
+ #include <atomic>
+ #include <cstddef>
+ #include <exception>
++#include <iostream>
+ 
+ #ifdef _OPENMP
+ #define INTRA_OP_PARALLEL
+ 
+ #include <omp.h>
++#include "kupl.h"
+ #endif
+ 
+ #ifdef _OPENMP
+ namespace at::internal {
+ template <typename F>
++struct func_args {
++    int64_t begin;
++    int64_t end;
++    int64_t grain_size;
++    const F& f;
++};
++
++template <typename F>
++static void parallel_function(kupl_nd_range_t *nd_range, void *args, int tid, int tnum)
++{
++    auto data = (func_args<F> *)args;
++    int64_t begin = data->begin;
++    int64_t end = data->end;
++    int64_t grain_size = data->grain_size;
++    const F& f = data->f;
++    int64_t num_threads = tnum;
++    if (grain_size > 0) {
++      num_threads = std::min(num_threads, divup((end - begin), grain_size));
++    }
++
++    int64_t chunk_size = divup((end - begin), num_threads);
++    int64_t begin_tid = begin + tid * chunk_size;
++    if (begin_tid < end) {
++        internal::ThreadIdGuard tid_guard(tid);
++        f(begin_tid, std::min(end, chunk_size + begin_tid));
++    }
++
++}
++
++#if 0
++template <typename F>
+ inline void invoke_parallel(
+     int64_t begin,
+     int64_t end,
+@@ -50,5 +83,29 @@ inline void invoke_parallel(
+     std::rethrow_exception(eptr);
+   }
+ }
++#endif
++template <typename F>
++inline void invoke_parallel(
++    int64_t begin,
++    int64_t end,
++    int64_t grain_size,
++    const F& f) {
++    std::exception_ptr eptr;
++    int num_executors = kupl_get_num_executors();
++    kupl_nd_range_t range;
++    KUPL_1D_RANGE_INIT(range, 0, num_executors);
++
++    kupl_parallel_for_desc_t desc = {
++        .field_mask = KUPL_PARALLEL_FOR_DESC_FIELD_DEFAULT,
++	.range = NULL,
++        .concurrency = num_executors,
++        .egroup = NULL,
++        .policy = KUPL_LOOP_POLICY_STATIC
++    };
++    func_args<F> args = {begin, end, grain_size, f};
++    //std::cout << "use kupl parallel for " << std::endl;
++    kupl_parallel_for(&desc, parallel_function<F>, &args);
++
++}
+ } // namespace at::internal
+ #endif // _OPENMP
+diff --git a/tools/setup_helpers/cmake.py b/tools/setup_helpers/cmake.py
+index 02ab011..c11b3ee 100644
+--- a/tools/setup_helpers/cmake.py
++++ b/tools/setup_helpers/cmake.py
+@@ -160,7 +160,7 @@ class CMake:
+         Returns:
+           dict: A ``dict`` containing the value of cached CMake variables.
+         """
+-        with open(self._cmake_cache_file) as f:
++        with open(self._cmake_cache_file, errors='ignore') as f:
+             return get_cmake_cache_variables_from_file(f)
+ 
+     def generate(
+diff --git a/tools/setup_helpers/env.py b/tools/setup_helpers/env.py
+index 3eb23af..321c473 100644
+--- a/tools/setup_helpers/env.py
++++ b/tools/setup_helpers/env.py
+@@ -64,7 +64,7 @@ class BuildType:
+             # Found CMakeCache.txt. Use the build type specified in it.
+             from .cmake_utils import get_cmake_cache_variables_from_file
+ 
+-            with open(cmake_cache_txt) as f:
++            with open(cmake_cache_txt, errors='ignore') as f:
+                 cmake_cache_vars = get_cmake_cache_variables_from_file(f)
+             # Normally it is anti-pattern to determine build type from CMAKE_BUILD_TYPE because it is not used for
+             # multi-configuration build tools, such as Visual Studio and XCode. But since we always communicate with
