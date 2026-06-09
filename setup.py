@@ -38,6 +38,7 @@ sources_example = [
 sources = [j for i in sources for j in glob.glob(i)]
 sources_example = [j for i in sources_example for j in glob.glob(i)]
 extra_compile_args = []
+extra_link_args = []
 include_dirs = [(root / "csrc").as_posix()]
 include_dirs_example = [(root / "csrc").as_posix()]
 include_dirs_example += [(root / "examples/csrc").as_posix()]
@@ -57,14 +58,12 @@ if KUTACC_ROOT:
     include_dirs += [f"{KUTACC_ROOT}/include"]
     library_dirs = [f"{KUTACC_ROOT}/lib"]
     libraries += ["kutacc"]
-    extra_compile_args += [f"-Wl, -rpath={KUTACC_ROOT}/lib"]
 
 KUDNN_ROOT = os.environ.get("KUDNN_ROOT", None)
 if KUDNN_ROOT:
     include_dirs += [f"{KUDNN_ROOT}/include"]
     library_dirs += [f"{KUDNN_ROOT}/lib"]
     libraries += ["kudnn"]
-    extra_compile_args += [f"-Wl, -rpath={KUDNN_ROOT}/lib"]
 
 library_dirs_example = []
 libraries_example = []
@@ -77,7 +76,22 @@ if KUPL_ROOT:
     library_dirs_example += [f"{KUPL_ROOT}/include"]
     libraries_example += [f"{KUPL_ROOT}/lib"]
     libraries_example = ["kupl"]
-    extra_compile_args += [f"-Wl, -rpath={KUPL_ROOT}/lib"]
+
+security_compile_args = [
+    "-fPIC",
+    "-fstack-protector-strong",
+    "-D_FORTIFY_SOURCE=2",
+    "-ftrapv",
+    "-fvisibility=hidden",
+]
+security_link_args = [
+    "-Wl,-z,relro,-z,now",
+    "-Wl,-z,noexecstack",
+    "-s",
+]
+
+extra_compile_args += security_compile_args
+extra_link_args += security_link_args
 
 setup(
     name="kunpeng-pytorch-extension",
@@ -92,6 +106,7 @@ setup(
             libraries=libraries,
             library_dirs=library_dirs,
             extra_compile_args={"cxx": extra_compile_args},
+            extra_link_args = extra_link_args,
         ),
 
         cpp_extension.CppExtension(
@@ -101,6 +116,7 @@ setup(
             libraries=libraries_example,
             library_dirs=libraries_example,
             extra_compile_args={"cxx": extra_compile_args},
+            extra_link_args = extra_link_args,
         )
     ],
     cmdclass={"build_ext": cpp_extension.BuildExtension}
