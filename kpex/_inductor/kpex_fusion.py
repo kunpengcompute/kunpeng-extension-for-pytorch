@@ -155,6 +155,14 @@ def kpex_fusion_passes(gm, example_inputs):
     def fused_linear_silu(match, x, weight, bias):
         # This emits the fused op directly into the LIR
         return torch.ops.kpex.linear_act(x, weight, bias)
+    
+    @register_lowering_pattern(CallFunction(torch.ops.aten.addmm, Arg(), Arg(), Arg()), pass_dict=graph_pass)
+    def kpex_addmm(match, bias, x, weight):
+        return torch.ops.kpex.custom_addmm(bias, x, weight)
+        
+    @register_lowering_pattern(CallFunction(torch.ops.aten.mm, Arg(), Arg()), pass_dict=graph_pass)
+    def kpex_addmm(match, x, weight):
+        return torch.ops.kpex.custom_mm(x, weight)
 
     make_fallback(torch.ops.kpex.linear_act) # Do not decompose into primitive ops
     

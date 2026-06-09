@@ -194,13 +194,4 @@ TORCH_LIBRARY_IMPL(kpex, CPU, m) {
     m.impl( TORCH_SELECTIVE_NAME("kpex::custom_mm.out"), TORCH_FN((&kpex::mm_out_impl)) );
 }
 
-// Operator Registration (Eager/JIT Mode Override) under the standard ATEN namespace
-TORCH_LIBRARY_IMPL(aten, CPU, m) {
-  m.impl( TORCH_SELECTIVE_NAME("aten::addmm"), TORCH_FN((&kpex::addmm_impl)) );
-// Convention replaces the period with an underscore in the C++ function name: addmm.out -> addmm_out
-  m.impl( TORCH_SELECTIVE_NAME("aten::addmm.out"), TORCH_FN((&kpex::addmm_out_impl)) );
-  m.impl( TORCH_SELECTIVE_NAME("aten::mm"), TORCH_FN((&kpex::mm_impl)) );
-  m.impl( TORCH_SELECTIVE_NAME("aten::mm.out"), TORCH_FN((&kpex::mm_out_impl)) );
-}
-
 } // namespace

@@ -16,10 +16,6 @@ from torch._inductor.compile_fx import compile_fx
 from .kpex_fusion import kpex_fusion_passes
 
 def kpex_compile(gm, example_inputs):
-    print("Pre-fuse table")
-    print(gm.graph.print_tabular())
     if os.getenv("KPEX_ENABLE_KUDNN_BACKEND", "false").lower() == "true":
         kpex_fusion_passes(gm, example_inputs) # Register extra fusion graph passes
-    print("Post-fuse table")
-    print(gm.graph.print_tabular())
     return compile_fx(gm, example_inputs) # Return to the native inductor graph compile passes
