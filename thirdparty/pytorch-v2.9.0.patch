@@ -1,0 +1,594 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index ce7890f..2056a18 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -378,7 +378,7 @@ cmake_dependent_option(BUILD_BUNDLE_PTXAS "Bundle PTX into torch/bin fodler"
+                        OFF "USE_CUDA" OFF)
+ cmake_dependent_option(USE_KLEIDIAI "Use KleidiAI for the ARM CPU & AARCH64 architecture." ON
+                         "CPU_AARCH64" OFF)
+-
++option(USE_HBW "Use HBW" ON)
+ option(USE_MIMALLOC "Use mimalloc" OFF)
+ # Enable third party mimalloc library to improve memory allocation performance
+ # on Windows.
+diff --git a/aten/src/ATen/EmptyTensor.cpp b/aten/src/ATen/EmptyTensor.cpp
+index 0e535ab..58ef5db 100644
+--- a/aten/src/ATen/EmptyTensor.cpp
++++ b/aten/src/ATen/EmptyTensor.cpp
+@@ -11,7 +11,7 @@
+ 
+ namespace at::detail {
+ namespace {
+-c10::Allocator* GetCPUAllocatorMaybePinned(bool pin_memory) {
++c10::Allocator* GetCPUAllocatorMaybePinned(bool pin_memory, bool use_hbw = false) {
+   if (pin_memory) {
+     // NB: This is not quite right, if you somehow had both CUDA and PrivateUse1 initialized
+     // in the same PyTorch build, you would ONLY ever get the CUDA pinned memory allocator.
+@@ -36,7 +36,9 @@ c10::Allocator* GetCPUAllocatorMaybePinned(bool pin_memory) {
+           "no pinned memory allocator is available on this system.")
+     }
+   }
+-
++  if (use_hbw) {
++    return c10::GetHBWAllocator();
++  }
+   return c10::GetCPUAllocator();
+ }
+ 
+@@ -270,8 +272,9 @@ TensorBase empty_strided_symint_generic(
+ }
+ 
+ TensorBase empty_cpu(IntArrayRef size, ScalarType dtype, bool pin_memory,
+-                     std::optional<c10::MemoryFormat> memory_format_opt) {
+-  auto allocator = GetCPUAllocatorMaybePinned(pin_memory);
++                     std::optional<c10::MemoryFormat> memory_format_opt,
++                     bool use_hbw) {
++  auto allocator = GetCPUAllocatorMaybePinned(pin_memory, use_hbw);
+   constexpr c10::DispatchKeySet cpu_ks(c10::DispatchKey::CPU);
+   return empty_generic(size, allocator, cpu_ks, dtype, memory_format_opt);
+ }
+@@ -288,7 +291,7 @@ TensorBase empty_cpu(
+ 
+   auto pin_memory = pinned_memory_or_default(pin_memory_opt);
+   auto dtype = dtype_or_default(dtype_opt);
+-  return empty_cpu(size, dtype, pin_memory, memory_format_opt);
++  return empty_cpu(size, dtype, pin_memory, memory_format_opt, device_or_default(device_opt).index() == 1);
+ }
+ 
+ TensorBase empty_cpu(
+@@ -303,8 +306,8 @@ TensorBase empty_cpu(
+ }
+ 
+ TensorBase empty_strided_cpu(IntArrayRef size, IntArrayRef stride,
+-                             ScalarType dtype, bool pin_memory) {
+-  auto allocator = at::detail::GetCPUAllocatorMaybePinned(pin_memory);
++                             ScalarType dtype, bool pin_memory, bool use_hbw) {
++  auto allocator = at::detail::GetCPUAllocatorMaybePinned(pin_memory, use_hbw);
+   constexpr c10::DispatchKeySet cpu_ks(c10::DispatchKey::CPU);
+   return at::detail::empty_strided_generic(
+       size, stride, allocator, cpu_ks, dtype);
+@@ -322,7 +325,7 @@ TensorBase empty_strided_cpu(
+ 
+   auto pin_memory = pinned_memory_or_default(pin_memory_opt);
+   auto dtype = dtype_or_default(dtype_opt);
+-  return at::detail::empty_strided_cpu(size, stride, dtype, pin_memory);
++  return at::detail::empty_strided_cpu(size, stride, dtype, pin_memory, device_or_default(device_opt).index() == 1);
+ }
+ 
+ TensorBase empty_strided_cpu(
+diff --git a/aten/src/ATen/EmptyTensor.h b/aten/src/ATen/EmptyTensor.h
+index e34be30..84eb287 100644
+--- a/aten/src/ATen/EmptyTensor.h
++++ b/aten/src/ATen/EmptyTensor.h
+@@ -76,7 +76,8 @@ TORCH_API TensorBase empty_cpu(
+     IntArrayRef size,
+     ScalarType dtype,
+     bool pin_memory = false,
+-    std::optional<c10::MemoryFormat> memory_format_opt = std::nullopt);
++    std::optional<c10::MemoryFormat> memory_format_opt = std::nullopt,
++    bool use_hbw = false);
+ 
+ TORCH_API TensorBase empty_cpu(
+     IntArrayRef size,
+@@ -92,7 +93,8 @@ TORCH_API TensorBase empty_strided_cpu(
+     IntArrayRef size,
+     IntArrayRef stride,
+     ScalarType dtype,
+-    bool pin_memory = false);
++    bool pin_memory = false,
++    bool use_hbw = false);
+ 
+ TORCH_API TensorBase empty_strided_cpu(
+     IntArrayRef size,
+diff --git a/aten/src/ATen/ParallelOpenMP.cpp b/aten/src/ATen/ParallelOpenMP.cpp
+index f1ce7d9..ec036c7 100644
+--- a/aten/src/ATen/ParallelOpenMP.cpp
++++ b/aten/src/ATen/ParallelOpenMP.cpp
+@@ -28,7 +28,7 @@ thread_local int this_thread_id{0};
+ void init_num_threads() {
+   auto nthreads = num_threads.load();
+   if (nthreads > 0) {
+-    set_num_threads(nthreads);
++    // set_num_threads(nthreads);
+   } else {
+ #if defined(_OPENMP) && AT_MKL_ENABLED() && !AT_MKL_SEQUENTIAL()
+     // If we are using MKL an OpenMP make sure the number of threads match.
+@@ -62,6 +62,7 @@ void set_num_threads(int nthreads) {
+   // because PyTorch uses caffe2::pthreadpool() in QNNPACK
+   caffe2::PThreadPool* const pool = caffe2::pthreadpool(nthreads);
+   TORCH_INTERNAL_ASSERT(pool, "Invalid thread pool!");
++  nthreads = 0;
+ #endif
+ #if AT_MKLDNN_ENABLED()
+   at::native::mkldnn::clear_computation_cache();
+@@ -93,7 +94,8 @@ void set_thread_num(int id) {
+ 
+ bool in_parallel_region() {
+ #ifdef _OPENMP
+-  return omp_in_parallel();
++  return false;
++  // return omp_in_parallel();
+ #else
+   return false;
+ #endif
+diff --git a/aten/src/ATen/ParallelOpenMP.h b/aten/src/ATen/ParallelOpenMP.h
+index 84e744b..f7119f3 100644
+--- a/aten/src/ATen/ParallelOpenMP.h
++++ b/aten/src/ATen/ParallelOpenMP.h
+@@ -4,16 +4,49 @@
+ #include <atomic>
+ #include <cstddef>
+ #include <exception>
++#include <iostream>
+ 
+ #ifdef _OPENMP
+ #define INTRA_OP_PARALLEL
+ 
+ #include <omp.h>
++#include "kupl.h"
+ #endif
+ 
+ #ifdef _OPENMP
+ namespace at::internal {
+ template <typename F>
++struct func_args {
++    int64_t begin;
++    int64_t end;
++    int64_t grain_size;
++    const F& f;
++};
++
++template <typename F>
++static void parallel_function(kupl_nd_range_t *nd_range, void *args, int tid, int tnum)
++{
++    auto data = (func_args<F> *)args;
++    int64_t begin = data->begin;
++    int64_t end = data->end;
++    int64_t grain_size = data->grain_size;
++    const F& f = data->f;
++    int64_t num_threads = tnum;
++    if (grain_size > 0) {
++      num_threads = std::min(num_threads, divup((end - begin), grain_size));
++    }
++
++    int64_t chunk_size = divup((end - begin), num_threads);
++    int64_t begin_tid = begin + tid * chunk_size;
++    if (begin_tid < end) {
++        internal::ThreadIdGuard tid_guard(tid);
++        f(begin_tid, std::min(end, chunk_size + begin_tid));
++    }
++
++}
++
++#if 0
++template <typename F>
+ inline void invoke_parallel(
+     int64_t begin,
+     int64_t end,
+@@ -50,5 +83,29 @@ inline void invoke_parallel(
+     std::rethrow_exception(eptr);
+   }
+ }
++#endif
++template <typename F>
++inline void invoke_parallel(
++    int64_t begin,
++    int64_t end,
++    int64_t grain_size,
++    const F& f) {
++    std::exception_ptr eptr;
++    int num_executors = kupl_get_num_executors();
++    kupl_nd_range_t range;
++    KUPL_1D_RANGE_INIT(range, 0, num_executors);
++
++    kupl_parallel_for_desc_t desc = {
++        .field_mask = KUPL_PARALLEL_FOR_DESC_FIELD_DEFAULT,
++	.range = NULL,
++        .concurrency = num_executors,
++        .egroup = NULL,
++        .policy = KUPL_LOOP_POLICY_STATIC
++    };
++    func_args<F> args = {begin, end, grain_size, f};
++    //std::cout << "use kupl parallel for " << std::endl;
++    kupl_parallel_for(&desc, parallel_function<F>, &args);
++
++}
+ } // namespace at::internal
+ #endif // _OPENMP
+diff --git a/aten/src/ATen/TensorIterator.cpp b/aten/src/ATen/TensorIterator.cpp
+index 9096cbf..154c09b 100644
+--- a/aten/src/ATen/TensorIterator.cpp
++++ b/aten/src/ATen/TensorIterator.cpp
+@@ -393,9 +393,13 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
+     TORCH_INTERNAL_ASSERT(op.target_dtype == op.current_dtype)
+ 
+     // Acquires the first non-CPU device (if any) as the common device
+-    if (common_device == kCPU && !op.tensor_base().is_cpu()) {
++    if (common_device.is_cpu() && !op.tensor_base().device().is_cpu()) {
+       common_device = op.tensor_base().device();
+     }
++    // Acquires HBW device (if no non-CPU device) as the common device
++    if (common_device == kCPU && op.tensor_base().device() == c10::Device(kCPU, 1)) {
++      common_device = c10::Device(kCPU, 1);
++    }
+ 
+     if (!op.is_output) {
+       // Determines if there are varying input dtypes
+@@ -497,7 +501,7 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
+         TORCH_CHECK(current_cpu_scalars_on_non_cpu < max_cpu_scalars_on_non_cpu,
+                     "Trying to pass too many CPU scalars to non-CPU kernel!");
+         ++current_cpu_scalars_on_non_cpu;
+-      } else if (op.device != common_device) {
++      } else if (op.device.value() != common_device && !(op.device->is_cpu() && common_device.is_cpu())) {
+         TORCH_CHECK(false,
+                     "Expected all tensors to be on the same device, but "
+                     "found at least two devices, ", common_device, " and ", op.device, "!");
+@@ -513,7 +517,7 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
+ 
+     // Creates temporaries for CPU operations, if needed and requested
+     // TODO: reuse temporaries when possible (e.g. for inplace operations)
+-    if (common_device == kCPU) {
++    if (common_device.is_cpu()) {
+       // Casts to outputs by creating temporaries of the correct dtype (if needed)
+       // NB: we skip this on is_meta_, because the temporary allocation here is
+       // unnecessary if we aren't going to actually do the compute
+diff --git a/c10/CMakeLists.txt b/c10/CMakeLists.txt
+index f82e460..0893e3e 100644
+--- a/c10/CMakeLists.txt
++++ b/c10/CMakeLists.txt
+@@ -95,6 +95,7 @@ if(NOT BUILD_LIBTORCHLESS)
+   target_link_libraries(c10 PRIVATE fmt::fmt-header-only)
+   target_link_libraries(c10 PRIVATE nlohmann)
+   target_link_libraries(c10 PRIVATE moodycamel)
++  target_link_libraries(c10 PRIVATE kpmalloc)
+ 
+   if(C10_USE_NUMA)
+     message(STATUS "NUMA paths:")
+diff --git a/c10/core/CPUAllocator.cpp b/c10/core/CPUAllocator.cpp
+index 4330bb6..7ff2c9d 100644
+--- a/c10/core/CPUAllocator.cpp
++++ b/c10/core/CPUAllocator.cpp
+@@ -46,6 +46,37 @@ struct C10_API DefaultCPUAllocator final : at::Allocator {
+   }
+ };
+ 
++struct C10_API HBWAllocator final : at::Allocator {
++  HBWAllocator() = default;
++  at::DataPtr allocate(size_t nbytes) override {
++    void* data = nullptr;
++    try {
++      data = c10::alloc_hbw(nbytes);
++    } catch (c10::Error& e) {
++      profiledCPUMemoryReporter().OutOfMemory(nbytes);
++      throw e;
++    }
++    profiledCPUMemoryReporter().New(data, nbytes);
++    return {data, data, &ReportAndDelete, at::Device(at::DeviceType::CPU, 1)};
++  }
++
++  void copy_data(void* dest, const void* src, std::size_t count) const override {
++      std::memcpy(dest, src, count);
++  }
++
++  static void ReportAndDelete(void* ptr) {
++    if (!ptr) {
++      return;
++    }
++    profiledCPUMemoryReporter().Delete(ptr);
++    free_hbw(ptr);
++  }
++
++  at::DeleterFnPtr raw_deleter() const override {
++    return &ReportAndDelete;
++  }
++};
++
+ ProfiledCPUMemoryReporter& profiledCPUMemoryReporter() {
+   static ProfiledCPUMemoryReporter reporter_;
+   return reporter_;
+@@ -160,6 +191,11 @@ at::Allocator* GetCPUAllocator() {
+   return GetAllocator(DeviceType::CPU);
+ }
+ 
++at::Allocator* GetHBWAllocator() {
++  static HBWAllocator g_hbw_cpu_alloc;
++  return &g_hbw_cpu_alloc;
++}
++
+ void SetCPUAllocator(at::Allocator* alloc, uint8_t priority) {
+   SetAllocator(DeviceType::CPU, alloc, priority);
+ }
+diff --git a/c10/core/CPUAllocator.h b/c10/core/CPUAllocator.h
+index 98debb9..e70f3f2 100644
+--- a/c10/core/CPUAllocator.h
++++ b/c10/core/CPUAllocator.h
+@@ -39,6 +39,7 @@ C10_API ProfiledCPUMemoryReporter& profiledCPUMemoryReporter();
+ 
+ // Get the CPU Allocator.
+ C10_API at::Allocator* GetCPUAllocator();
++C10_API at::Allocator* GetHBWAllocator();
+ // Sets the CPU allocator to the given allocator: the caller gives away the
+ // ownership of the pointer.
+ C10_API void SetCPUAllocator(at::Allocator* alloc, uint8_t priority = 0);
+diff --git a/c10/core/Device.h b/c10/core/Device.h
+index 52a116d..92d09bd 100644
+--- a/c10/core/Device.h
++++ b/c10/core/Device.h
+@@ -178,10 +178,17 @@ struct C10_API Device final {
+         index_ >= -1,
+         "Device index must be -1 or non-negative, got ",
+         static_cast<int>(index_));
++#ifndef USE_HBW
+     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+         !is_cpu() || index_ <= 0,
+         "CPU device index must be -1 or zero, got ",
+         static_cast<int>(index_));
++#else
++    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
++        !is_cpu() || index_ <= 1,
++        "CPU device index must be -1, zero, or 1 (HBW), got ",
++        static_cast<int>(index_));
++#endif
+   }
+ };
+ 
+diff --git a/c10/core/impl/alloc_cpu.cpp b/c10/core/impl/alloc_cpu.cpp
+index 7911046..dbd69aa 100644
+--- a/c10/core/impl/alloc_cpu.cpp
++++ b/c10/core/impl/alloc_cpu.cpp
+@@ -8,6 +8,9 @@
+ #include <c10/util/irange.h>
+ #include <c10/util/numa.h>
+ #include <cstring>
++#ifdef USE_HBW
++#include <kpmalloc.h>
++#endif
+ 
+ #ifdef USE_MIMALLOC
+ #include <mimalloc.h>
+@@ -195,4 +198,44 @@ void c10_mi_free(void* p) {
+ }
+ } // namespace mi_malloc_wrapper
+ #endif
++
++void* alloc_hbw(size_t nbytes) {
++#ifdef USE_HBW
++  if (nbytes == 0) {
++    return nullptr;
++  }
++  // We might have clowny upstream code that tries to alloc a negative number
++  // of bytes. Let's catch it early.
++  CAFFE_ENFORCE(
++      ((ptrdiff_t)nbytes) >= 0,
++      "alloc_hbw() seems to have been called with negative number: ",
++      nbytes);
++
++  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
++  void* data = kp_kupl_alloc(nbytes);
++
++  CHECK(
++      !FLAGS_caffe2_cpu_allocator_do_zero_fill ||
++      !FLAGS_caffe2_cpu_allocator_do_junk_fill)
++      << "Cannot request both zero-fill and junk-fill at the same time";
++  if (FLAGS_caffe2_cpu_allocator_do_zero_fill) {
++    memset(data, 0, nbytes);
++  } else if (FLAGS_caffe2_cpu_allocator_do_junk_fill) {
++    memset_junk(data, nbytes);
++  }
++
++  return data;
++#else
++  CAFFE_ENFORCE(false, "In alloc_hbw: HBW is not supported");
++  return nullptr;
++#endif
++}
++
++void free_hbw(void* data) {
++#ifdef USE_HBW
++  kp_free(data);
++#else
++  CAFFE_ENFORCE(false, "In free_hbw: HBW is not supported");
++#endif
++}
+ } // namespace c10
+diff --git a/c10/core/impl/alloc_cpu.h b/c10/core/impl/alloc_cpu.h
+index 2139902..2200602 100644
+--- a/c10/core/impl/alloc_cpu.h
++++ b/c10/core/impl/alloc_cpu.h
+@@ -9,6 +9,8 @@ namespace c10 {
+ 
+ C10_API void* alloc_cpu(size_t nbytes);
+ C10_API void free_cpu(void* data);
++C10_API void* alloc_hbw(size_t nbytes);
++C10_API void free_hbw(void* data);
+ 
+ #if defined(__linux__) && !defined(__ANDROID__)
+ C10_API size_t c10_compute_alignment(size_t nbytes);
+diff --git a/caffe2/CMakeLists.txt b/caffe2/CMakeLists.txt
+index 6ab41b6..c0ea8e1 100644
+--- a/caffe2/CMakeLists.txt
++++ b/caffe2/CMakeLists.txt
+@@ -1546,6 +1546,7 @@ endif()
+ 
+ target_link_libraries(torch_cpu PUBLIC c10)
+ target_link_libraries(torch_cpu PUBLIC ${Caffe2_PUBLIC_DEPENDENCY_LIBS})
++message("Caffe2_DEPENDENCY_LIBS ${Caffe2_DEPENDENCY_LIBS}")
+ target_link_libraries(torch_cpu PRIVATE ${Caffe2_DEPENDENCY_LIBS})
+ target_link_libraries(torch_cpu PRIVATE ${Caffe2_DEPENDENCY_WHOLE_LINK_LIBS})
+ if(USE_MPI)
+diff --git a/cmake/Dependencies.cmake b/cmake/Dependencies.cmake
+index ef5c2fd..43142d4 100644
+--- a/cmake/Dependencies.cmake
++++ b/cmake/Dependencies.cmake
+@@ -1708,6 +1708,18 @@ if(USE_KINETO)
+   endif()
+ endif()
+ 
++# ---[ KPMALLOC
++if(USE_HBW)
++  set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
++  if(NOT DEFINED KPMALLOC_SOURCE_DIR)
++    set(KPMALLOC_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/kpmalloc" CACHE STRING "KPMALLOC source directory")
++  endif()
++  add_subdirectory("${KPMALLOC_SOURCE_DIR}")
++  include_directories(SYSTEM ${KPMALLOC_INCLUDE_DIRS})
++  list(APPEND Caffe2_DEPENDENCY_LIBS kpmalloc)
++  string(APPEND CMAKE_CXX_FLAGS " -DUSE_HBW")
++endif()
++
+ # Include google/FlatBuffers
+ include(${CMAKE_CURRENT_LIST_DIR}/FlatBuffers.cmake)
+ 
+diff --git a/third_party/kpmalloc/.clang-format b/third_party/kpmalloc/.clang-format
+new file mode 100644
+index 0000000..9f26a86
+--- /dev/null
++++ b/third_party/kpmalloc/.clang-format
+@@ -0,0 +1,7 @@
++Language: Cpp
++BasedOnStyle: Huawei
++BinPackArguments: true
++BinPackParameters: true
++AllowAllArgumentsOnNextLine: false
++AllowAllParametersOfDeclarationOnNextLine: false
++...
+diff --git a/third_party/kpmalloc/CMakeLists.txt b/third_party/kpmalloc/CMakeLists.txt
+new file mode 100644
+index 0000000..986d3a8
+--- /dev/null
++++ b/third_party/kpmalloc/CMakeLists.txt
+@@ -0,0 +1,24 @@
++cmake_minimum_required(VERSION 3.13)
++project(libkpmalloc)
++
++list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
++
++set(kpmalloc_sources
++    kpmalloc.c)
++
++add_library(kpmalloc SHARED ${kpmalloc_sources})
++target_include_directories(kpmalloc PUBLIC
++    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
++    $<INSTALL_INTERFACE:include>
++)
++
++if(USE_HBW)
++  target_compile_definitions(kpmalloc PRIVATE USE_HBW)
++endif()
++
++install(
++  TARGETS kpmalloc
++  EXPORT Caffe2Targets
++  DESTINATION lib)
++
++set(KPMALLOC_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/include PARENT_SCOPE)
+diff --git a/third_party/kpmalloc/kpmalloc.c b/third_party/kpmalloc/kpmalloc.c
+new file mode 100644
+index 0000000..0c7652b
+--- /dev/null
++++ b/third_party/kpmalloc/kpmalloc.c
+@@ -0,0 +1,34 @@
++#include "kpmalloc.h"
++#include <dlfcn.h>
++#include <errno.h>
++#include <stdlib.h>
++#ifdef USE_HBW
++#include <memkind.h>
++#include <kupl.h>
++#endif
++
++bool kp_use_hbw() {
++#ifdef USE_HBW
++    return true;
++#else
++    return false;
++#endif
++}
++
++void* kp_kupl_alloc(int size){
++    void* ptr = kupl_hbw_malloc(size);
++    if (ptr == NULL) {
++        fprintf(stderr, "kupl_hbw_malloc failed\n");
++        exit(1);
++    }
++    return ptr;
++}
++
++void kp_free(void *ptr)
++{
++#ifdef USE_HBW
++    kupl_hbw_free(ptr);
++#else
++    return free(ptr);
++#endif
++}
+diff --git a/third_party/kpmalloc/kpmalloc.h b/third_party/kpmalloc/kpmalloc.h
+new file mode 100644
+index 0000000..ec75480
+--- /dev/null
++++ b/third_party/kpmalloc/kpmalloc.h
+@@ -0,0 +1,18 @@
++#pragma once
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++#include <stddef.h>
++#include <stdbool.h>
++
++bool kp_use_hbw();
++
++void* kp_kupl_alloc(int size);
++
++void kp_free(void *ptr);
++
++#ifdef __cplusplus
++}
++#endif
+diff --git a/tools/setup_helpers/cmake.py b/tools/setup_helpers/cmake.py
+index 02ab011..c11b3ee 100644
+--- a/tools/setup_helpers/cmake.py
++++ b/tools/setup_helpers/cmake.py
+@@ -160,7 +160,7 @@ class CMake:
+         Returns:
+           dict: A ``dict`` containing the value of cached CMake variables.
+         """
+-        with open(self._cmake_cache_file) as f:
++        with open(self._cmake_cache_file, errors='ignore') as f:
+             return get_cmake_cache_variables_from_file(f)
+ 
+     def generate(
+diff --git a/tools/setup_helpers/env.py b/tools/setup_helpers/env.py
+index 3eb23af..321c473 100644
+--- a/tools/setup_helpers/env.py
++++ b/tools/setup_helpers/env.py
+@@ -64,7 +64,7 @@ class BuildType:
+             # Found CMakeCache.txt. Use the build type specified in it.
+             from .cmake_utils import get_cmake_cache_variables_from_file
+ 
+-            with open(cmake_cache_txt) as f:
++            with open(cmake_cache_txt, errors='ignore') as f:
+                 cmake_cache_vars = get_cmake_cache_variables_from_file(f)
+             # Normally it is anti-pattern to determine build type from CMAKE_BUILD_TYPE because it is not used for
+             # multi-configuration build tools, such as Visual Studio and XCode. But since we always communicate with
