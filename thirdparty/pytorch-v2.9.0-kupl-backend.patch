@@ -1,0 +1,265 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index ce7890f..da4a672 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -282,7 +282,8 @@ cmake_dependent_option(USE_NVRTC "Use NVRTC. Only available if USE_CUDA is on."
+ option(USE_NUMPY "Use NumPy" ON)
+ option(USE_OBSERVERS "Use observers module." OFF)
+ option(USE_OPENCL "Use OpenCL" OFF)
+-option(USE_OPENMP "Use OpenMP for parallel code" ON)
++option(USE_OPENMP "Use OpenMP for parallel code" OFF)
++option(USE_KUPL "Use Kupl for parallel code" ON)
+ option(USE_PRECOMPILED_HEADERS "Use pre-compiled headers to accelerate build."
+        OFF)
+ 
+diff --git a/aten/src/ATen/Config.h.in b/aten/src/ATen/Config.h.in
+index 0bae6d4..6e11c0e 100644
+--- a/aten/src/ATen/Config.h.in
++++ b/aten/src/ATen/Config.h.in
+@@ -17,6 +17,7 @@
+ #define AT_BUILD_WITH_LAPACK() @AT_BUILD_WITH_LAPACK@
+ #define AT_PARALLEL_OPENMP @AT_PARALLEL_OPENMP@
+ #define AT_PARALLEL_NATIVE @AT_PARALLEL_NATIVE@
++#define AT_PARALLEL_KUPL @AT_PARALLEL_KUPL@
+ #define AT_BLAS_F2C() @AT_BLAS_F2C@
+ #define AT_BLAS_USE_CBLAS_DOT() @AT_BLAS_USE_CBLAS_DOT@
+ #define AT_KLEIDIAI_ENABLED() @AT_KLEIDIAI_ENABLED@
+diff --git a/aten/src/ATen/Parallel.h b/aten/src/ATen/Parallel.h
+index b55dad0..4bbdd30 100644
+--- a/aten/src/ATen/Parallel.h
++++ b/aten/src/ATen/Parallel.h
+@@ -149,7 +149,9 @@ TORCH_API int intraop_default_num_threads();
+ 
+ } // namespace at
+ 
+-#if AT_PARALLEL_OPENMP
++#if AT_PARALLEL_KUPL
++#include <ATen/ParallelKupl.h> // IWYU pragma: keep
++#elif AT_PARALLEL_OPENMP
+ #include <ATen/ParallelOpenMP.h> // IWYU pragma: keep
+ #elif AT_PARALLEL_NATIVE
+ #include <ATen/ParallelNative.h> // IWYU pragma: keep
+diff --git a/aten/src/ATen/ParallelKupl.cpp b/aten/src/ATen/ParallelKupl.cpp
+new file mode 100644
+index 0000000..1b0fba0
+--- /dev/null
++++ b/aten/src/ATen/ParallelKupl.cpp
+@@ -0,0 +1,55 @@
++#include <ATen/Config.h>
++#include <ATen/core/jit_type.h>
++#if AT_PARALLEL_KUPL
++#include <ATen/Parallel.h>
++
++#include <atomic>
++
++namespace at {
++
++namespace {
++// Number of threads set by the user
++std::atomic<int> num_threads{-1};
++thread_local int this_thread_id{0};
++
++} // namespace
++
++void init_num_threads() {
++  auto nthreads = num_threads.load();
++  if (nthreads > 0) {
++    kupl_set_kernel_concurrency(nthreads);
++  } else {
++    kupl_set_kernel_concurrency(intraop_default_num_threads());
++  }
++}
++
++void set_num_threads(int nthreads) {
++  TORCH_CHECK(nthreads > 0, "Expected positive number of threads");
++  num_threads.store(nthreads);
++  kupl_set_kernel_concurrency(nthreads);
++}
++
++// Explicitly calling omp_get_max_threads() as the size of the parallel
++// region might be different in the new thread;
++// Use init_num_threads() during thread initialization to ensure
++// consistent size of parallel region in different threads
++int get_num_threads() {
++  return num_threads.load();
++}
++
++int get_thread_num() {
++  this_thread_id = kupl_get_thread_num();
++  return this_thread_id;
++}
++
++namespace internal {
++void set_thread_num(int id) {
++  this_thread_id = id;
++}
++}
++
++bool in_parallel_region() {
++  return kupl_in_parallel();
++}
++} // namespace at
++#endif
+diff --git a/aten/src/ATen/ParallelKupl.h b/aten/src/ATen/ParallelKupl.h
+new file mode 100644
+index 0000000..3abe61a
+--- /dev/null
++++ b/aten/src/ATen/ParallelKupl.h
+@@ -0,0 +1,64 @@
++#pragma once
++
++#include <ATen/Config.h>
++#include <algorithm>
++#include <atomic>
++#include <cstddef>
++#include <exception>
++
++#ifdef AT_PARALLEL_KUPL
++#include "kupl.h"
++
++namespace at::internal {
++template <typename F>
++struct func_args {
++    int64_t begin;
++    int64_t end;
++    int64_t grain_size;
++    const F& f;
++};
++
++template <typename F>
++static void parallel_function(kupl_nd_range_t *nd_range, void *args, int tid, int tnum)
++{
++    auto data = (func_args<F> *)args;
++    int64_t begin = data->begin;
++    int64_t end = data->end;
++    int64_t grain_size = data->grain_size;
++    const F& f = data->f;
++    int64_t num_threads = tnum;
++    if (grain_size > 0) {
++      num_threads = std::min(num_threads, divup((end - begin), grain_size));
++    }
++
++    int64_t chunk_size = divup((end - begin), num_threads);
++    int64_t begin_tid = begin + tid * chunk_size;
++    if (begin_tid < end) {
++        internal::ThreadIdGuard tid_guard(tid);
++        f(begin_tid, std::min(end, chunk_size + begin_tid));
++    }
++}
++
++template <typename F>
++inline void invoke_parallel(
++    int64_t begin,
++    int64_t end,
++    int64_t grain_size,
++    const F& f) {
++    std::exception_ptr eptr;
++    int num_executors = kupl_get_num_executors();
++    kupl_nd_range_t range;
++    KUPL_1D_RANGE_INIT(range, 0, num_executors);
++
++    kupl_parallel_for_desc_t desc = {
++        .field_mask = KUPL_PARALLEL_FOR_DESC_FIELD_DEFAULT,
++	      .range = NULL,
++        .concurrency = num_executors,
++        .egroup = NULL,
++        .policy = KUPL_LOOP_POLICY_STATIC
++    };
++    func_args<F> args = {begin, end, grain_size, f};
++    kupl_parallel_for(&desc, parallel_function<F>, &args);
++}
++} // namespace at::internal
++#endif
+diff --git a/aten/src/ATen/ParallelThreadPoolNative.cpp b/aten/src/ATen/ParallelThreadPoolNative.cpp
+index 5af4dfc..f7af10f 100644
+--- a/aten/src/ATen/ParallelThreadPoolNative.cpp
++++ b/aten/src/ATen/ParallelThreadPoolNative.cpp
+@@ -1,5 +1,5 @@
+ #include <ATen/Config.h>
+-#if AT_PARALLEL_OPENMP || AT_PARALLEL_NATIVE
++#if AT_PARALLEL_OPENMP || AT_PARALLEL_NATIVE || AT_PARALLEL_KUPL
+ #include <ATen/Parallel.h>
+ #include <ATen/PTThreadPool.h>
+ #include <ATen/ThreadLocalState.h>
+diff --git a/build_variables.bzl b/build_variables.bzl
+index 05f5fb1..85e7181 100644
+--- a/build_variables.bzl
++++ b/build_variables.bzl
+@@ -1111,6 +1111,7 @@ aten_cpu_source_non_codegen_list = [
+     "aten/src/ATen/ParallelCommon.cpp",
+     "aten/src/ATen/ParallelNative.cpp",
+     "aten/src/ATen/ParallelOpenMP.cpp",
++    "aten/src/ATen/ParallelKupl.cpp",
+     "aten/src/ATen/ParallelThreadPoolNative.cpp",
+     "aten/src/ATen/PythonTorchFunctionTLS.cpp",
+     "aten/src/ATen/ThreadLocalPythonObjects.cpp",
+diff --git a/caffe2/CMakeLists.txt b/caffe2/CMakeLists.txt
+index 6ab41b6..bee2164 100644
+--- a/caffe2/CMakeLists.txt
++++ b/caffe2/CMakeLists.txt
+@@ -19,7 +19,9 @@ endif()
+ if(INTERN_BUILD_MOBILE)
+   set(ATEN_THREADING "NATIVE" CACHE STRING "ATen parallel backend")
+ else()
+-  if(USE_OPENMP)
++  if(USE_KUPL)
++    set(ATEN_THREADING "KUPL" CACHE STRING "ATen parallel backend")
++  elseif(USE_OPENMP)
+     set(ATEN_THREADING "OMP" CACHE STRING "ATen parallel backend")
+   else()
+     set(ATEN_THREADING "NATIVE" CACHE STRING "ATen parallel backend")
+@@ -28,9 +30,12 @@ endif()
+ 
+ set(AT_PARALLEL_OPENMP 0)
+ set(AT_PARALLEL_NATIVE 0)
++set(AT_PARALLEL_KUPL 0)
+ 
+ message(STATUS "Using ATen parallel backend: ${ATEN_THREADING}")
+-if("${ATEN_THREADING}" STREQUAL "OMP")
++if("${ATEN_THREADING}" STREQUAL "KUPL")
++  set(AT_PARALLEL_KUPL 1)
++elseif("${ATEN_THREADING}" STREQUAL "OMP")
+   set(AT_PARALLEL_OPENMP 1)
+ elseif("${ATEN_THREADING}" STREQUAL "NATIVE")
+   set(AT_PARALLEL_NATIVE 1)
+diff --git a/caffe2/core/macros.h.in b/caffe2/core/macros.h.in
+index 5b971b1..5fdf1bd 100644
+--- a/caffe2/core/macros.h.in
++++ b/caffe2/core/macros.h.in
+@@ -51,6 +51,7 @@
+   {"USE_GLOO", "${USE_GLOO}"}, \
+   {"USE_NNPACK", "${USE_NNPACK}"}, \
+   {"USE_OPENMP", "${USE_OPENMP}"}, \
++  {"USE_KUPL", "${USE_KUPL}"}, \
+   {"FORCE_FALLBACK_CUDA_MPI", "${CAFFE2_FORCE_FALLBACK_CUDA_MPI}"}, \
+   {"HAS_MKL_DNN", "${CAFFE2_HAS_MKL_DNN}"}, \
+   {"HAS_MKL_SGEMM_PACK", "${CAFFE2_HAS_MKL_SGEMM_PACK}"}, \
+diff --git a/tools/setup_helpers/cmake.py b/tools/setup_helpers/cmake.py
+index 02ab011..c11b3ee 100644
+--- a/tools/setup_helpers/cmake.py
++++ b/tools/setup_helpers/cmake.py
+@@ -160,7 +160,7 @@ class CMake:
+         Returns:
+           dict: A ``dict`` containing the value of cached CMake variables.
+         """
+-        with open(self._cmake_cache_file) as f:
++        with open(self._cmake_cache_file, errors='ignore') as f:
+             return get_cmake_cache_variables_from_file(f)
+ 
+     def generate(
+diff --git a/tools/setup_helpers/env.py b/tools/setup_helpers/env.py
+index 3eb23af..321c473 100644
+--- a/tools/setup_helpers/env.py
++++ b/tools/setup_helpers/env.py
+@@ -64,7 +64,7 @@ class BuildType:
+             # Found CMakeCache.txt. Use the build type specified in it.
+             from .cmake_utils import get_cmake_cache_variables_from_file
+ 
+-            with open(cmake_cache_txt) as f:
++            with open(cmake_cache_txt, errors='ignore') as f:
+                 cmake_cache_vars = get_cmake_cache_variables_from_file(f)
+             # Normally it is anti-pattern to determine build type from CMAKE_BUILD_TYPE because it is not used for
+             # multi-configuration build tools, such as Visual Studio and XCode. But since we always communicate with
+-- 
+2.28.0.windows.1
+

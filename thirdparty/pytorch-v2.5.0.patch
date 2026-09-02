@@ -612,7 +612,7 @@ index 0000000..83496cd
 +    $ENV{KMLROOT}/include
 +)
 +SET(KML_BLAS_LIB_SEARCH_PATHS
-+    $ENV{KMLROOT}/lib/sme/kblas/multi/
++    $ENV{KMLROOT}/lib/matrix/kblas/multi/
 +)
 +
 +FIND_PATH(KML_INCLUDE_DIR NAMES kblas.h PATHS ${KML_BLAS_INCLUDE_SEARCH_PATHS})
