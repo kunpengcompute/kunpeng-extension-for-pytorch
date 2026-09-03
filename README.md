@@ -86,11 +86,20 @@ CFLAGS="-stdlib=libstdc++ -lstdc++" KPEX_BUILD_TYPE=release HMPI_ROOT=<path_to_H
 
 #### 6. 运行与验证
 
+##### 编译安装验证
 执行**python**命令进入python命令行，在命令行中执行：
 ```
 import kpex
 ```
 无报错回显，则说明编译安装成功。
+
+##### 运行测试用例
+需要进入examples目录，运行optimization_simple_model_test.py:
+```
+cd examples
+python optimization_simple_model_test.py
+```
+无报错回显，则说明测试用例运行成功。
 
 ## 📖学习教程
 
