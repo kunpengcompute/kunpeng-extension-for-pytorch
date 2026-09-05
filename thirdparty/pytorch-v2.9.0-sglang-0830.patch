@@ -101,7 +101,7 @@ index e34be30..84eb287 100644
  TORCH_API TensorBase empty_strided_cpu(
      IntArrayRef size,
 diff --git a/aten/src/ATen/ParallelOpenMP.cpp b/aten/src/ATen/ParallelOpenMP.cpp
-index f1ce7d9..78f14e2 100644
+index f1ce7d9..4def4f2 100644
 --- a/aten/src/ATen/ParallelOpenMP.cpp
 +++ b/aten/src/ATen/ParallelOpenMP.cpp
 @@ -28,16 +28,16 @@ thread_local int this_thread_id{0};
@@ -147,7 +147,7 @@ index f1ce7d9..78f14e2 100644
    at::internal::lazy_init_num_threads();
 -  return omp_get_max_threads();
 +  // return omp_get_max_threads();
-+  return 1;
++  return 32;
  #else
    return 1;
  #endif
@@ -162,10 +162,10 @@ index f1ce7d9..78f14e2 100644
    return false;
  #endif
 diff --git a/aten/src/ATen/ParallelOpenMP.h b/aten/src/ATen/ParallelOpenMP.h
-index 84e744b..f7119f3 100644
+index 84e744b..cf173bb 100644
 --- a/aten/src/ATen/ParallelOpenMP.h
 +++ b/aten/src/ATen/ParallelOpenMP.h
-@@ -4,16 +4,49 @@
+@@ -4,16 +4,72 @@
  #include <atomic>
  #include <cstddef>
  #include <exception>
@@ -188,6 +188,29 @@ index 84e744b..f7119f3 100644
 +    const F& f;
 +};
 +
++struct torch_parallel_info {
++    int exes[38];
++    kupl_egroup_h eg = nullptr;
++
++    torch_parallel_info()
++    {
++      for (int i = 0; i < 32; i++) {
++          exes[i] = i + 1;
++      }
++      eg = kupl_egroup_create(exes, 32);
++    }
++
++    ~torch_parallel_info()
++    {
++        kupl_egroup_destroy(eg);
++    }
++};
++
++static torch_parallel_info &get_info()
++{
++    static torch_parallel_info info;
++    return info;
++}
 +template <typename F>
 +static void parallel_function(kupl_nd_range_t *nd_range, void *args, int tid, int tnum)
 +{
@@ -215,7 +238,7 @@ index 84e744b..f7119f3 100644
  inline void invoke_parallel(
      int64_t begin,
      int64_t end,
-@@ -50,5 +83,29 @@ inline void invoke_parallel(
+@@ -50,5 +106,26 @@ inline void invoke_parallel(
      std::rethrow_exception(eptr);
    }
  }
@@ -227,15 +250,12 @@ index 84e744b..f7119f3 100644
 +    int64_t grain_size,
 +    const F& f) {
 +    std::exception_ptr eptr;
-+    int num_executors = kupl_get_num_executors();
-+    kupl_nd_range_t range;
-+    KUPL_1D_RANGE_INIT(range, 0, num_executors);
 +
 +    kupl_parallel_for_desc_t desc = {
 +        .field_mask = KUPL_PARALLEL_FOR_DESC_FIELD_DEFAULT,
 +	.range = NULL,
-+        .concurrency = num_executors,
-+        .egroup = NULL,
++        .concurrency = 32,
++        .egroup = get_info().eg,
 +        .policy = KUPL_LOOP_POLICY_STATIC
 +    };
 +    func_args<F> args = {begin, end, grain_size, f};
