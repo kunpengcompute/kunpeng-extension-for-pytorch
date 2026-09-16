@@ -50,6 +50,20 @@ bool allreduce_inplace_enabled() {
     return v;
 }
 
+/* 输入快照：empty_like + 单线程拷贝（调用方已保证 contiguous）。
+ * 不用 t.clone()——clone 对大 tensor（>GRAIN_SIZE 32768 元素）走
+ * at::parallel_for，其线程池按物理核数创建（不感知 cgroup 限额），
+ * 限核环境下大 tensor 拷贝被线程栅栏放大一个数量级；单线程拷贝
+ * 行为恒定，代价仅单线程带宽。 */
+at::Tensor input_snapshot(const at::Tensor &t) {
+    at::Tensor out = at::empty_like(t);
+    const size_t bytes =
+        static_cast<size_t>(t.numel()) * static_cast<size_t>(t.element_size());
+    if (bytes > 0)
+        std::memcpy(out.data_ptr(), t.data_ptr(), bytes);
+    return out;
+}
+
 /* barrier 走 1 字节 allreduce；KUCCL_BARRIER=store 回退 TCPStore 版。 */
 bool barrier_use_store() {
     static const bool v = [] {
@@ -341,7 +355,7 @@ c10::intrusive_ptr<Work> BackendKuccl::allreduce(std::vector<at::Tensor> &tensor
         at::Tensor sendbuf; /* clone 路径才持有副本 */
         void *send_ptr = t.data_ptr();
         if (!allreduce_inplace_enabled()) {
-            sendbuf = t.clone();
+            sendbuf = input_snapshot(t);
             send_ptr = sendbuf.data_ptr();
         }
         kucclRequest_t req = nullptr;
@@ -393,7 +407,7 @@ c10::intrusive_ptr<Work> BackendKuccl::allreduce(std::vector<at::Tensor> &tensor
     at::Tensor sendbuf; /* clone 路径才持有副本 */
     void *send_ptr = flat.data_ptr();
     if (!allreduce_inplace_enabled()) {
-        sendbuf = flat.clone();
+        sendbuf = input_snapshot(flat);
         send_ptr = sendbuf.data_ptr();
     }
 
