@@ -53,7 +53,7 @@ bool allreduce_inplace_enabled() {
 /* ── allreduce 输入快照：独立副本，正确性与底层算法解耦 ──────────
  *
  * 拷贝路径按消息大小分段（默认分界 4MB，可调）：
- *   ≤ KUCCL_SNAPSHOT_SERIAL_MAX：串行 memcpy（不修改线程配置）
+ *   ≤ TORCH_KUCCL_SNAPSHOT_SERIAL_MAX：串行 memcpy（不修改线程配置）
  *   更大：线程数收敛到可用核数后 clone，结束恢复
  *
  * 真实核数 = 调用线程绑定的 CPU 集合（sched_getaffinity）∩ cgroup CPU
@@ -61,10 +61,10 @@ bool allreduce_inplace_enabled() {
  * 收敛只缩不放：宿主线程数不超过该值时不动，尊重上层配置；
  * RAII 保证异常路径恢复。 */
 
-/* 分段阈值（字节）：KUCCL_SNAPSHOT_SERIAL_MAX 可按部署环境重标 */
-static size_t snapshot_serial_max() {
+/* 分段阈值（字节）：TORCH_KUCCL_SNAPSHOT_SERIAL_MAX 可按部署环境重标 */
+static size_t package_threshold_mt() {
     static const size_t v = [] {
-        if (const char *e = std::getenv("KUCCL_SNAPSHOT_SERIAL_MAX")) {
+        if (const char *e = std::getenv("TORCH_KUCCL_SNAPSHOT_SERIAL_MAX")) {
             const unsigned long long b = std::strtoull(e, nullptr, 10);
             if (b > 0)
                 return static_cast<size_t>(b);
@@ -77,7 +77,6 @@ static size_t snapshot_serial_max() {
 /* cgroup CPU 配额折算核数（>0 为 N 核，-1 无配额）；进程内缓存 */
 static int cpu_quota_cpus() {
     static const int q = [] {
-#if defined(__linux__)
         char v[32];
         unsigned long long period = 0;
         /* cgroup v2: "<quota> <period>"，"max" = 不限 */
@@ -107,8 +106,6 @@ static int cpu_quota_cpus() {
         }
         const long long c = (quota + p - 1) / p;
         return c > 1000000 ? -1 : static_cast<int>(c);
-#endif
-        return -1;
     }();
     return q;
 }
@@ -116,25 +113,15 @@ static int cpu_quota_cpus() {
 /* 调用线程被绑定（允许运行）的 CPU 个数；探测失败返回 0。
  * 绑定集合是线程数上限而非独占核数（可能与其他进程共享）。 */
 static int bound_cpu_count() {
-#if defined(__linux__)
     cpu_set_t set;
     if (sched_getaffinity(0, sizeof(set), &set) != 0)
         return 0;
     return std::max(CPU_COUNT(&set), 0);
-#else
-    return 0;
-#endif
 }
 
-/* clone 期间收敛到的线程数上限：绑定 CPU 集合 ∩ cgroup 配额，
- * KUCCL_COPY_THREADS 显式覆盖；0 = 探测失败（不干预） */
+/* clone 期间收敛到的线程数上限：绑定 CPU 集合 ∩ cgroup 配额；
+ * 0 = 探测失败（不干预） */
 static int clone_thread_cap() {
-    static const int env_cap = [] {
-        const char *e = std::getenv("KUCCL_COPY_THREADS");
-        return e != nullptr ? std::max(std::atoi(e), 0) : 0;
-    }();
-    if (env_cap > 0)
-        return env_cap;
     const int bound = bound_cpu_count();
     if (bound <= 0)
         return 0;
@@ -168,7 +155,7 @@ private:
 };
 
 /* 串行拷贝（不修改线程配置） */
-static at::Tensor snap_memcpy(const at::Tensor &t) {
+static at::Tensor memcpy_st(const at::Tensor &t) {
     at::Tensor out = at::empty_like(t);
     const size_t bytes =
         static_cast<size_t>(t.numel()) * static_cast<size_t>(t.element_size());
@@ -178,20 +165,20 @@ static at::Tensor snap_memcpy(const at::Tensor &t) {
 }
 
 /* 并行拷贝：收敛到真实核数后 clone，完事恢复 */
-static at::Tensor snap_affinity(const at::Tensor &t) {
+static at::Tensor memcpy_mt(const at::Tensor &t) {
     if (at::in_parallel_region()) /* 并行区内 clone 自动串行，且不应改线程数 */
         return t.clone();
     const ScopedCloneThreads cap;
     return t.clone();
 }
 
-/* 输入快照主入口：按消息大小分段选路径（见顶部说明） */
-at::Tensor input_snapshot(const at::Tensor &t) {
+/* 拷贝主入口：按消息大小自适应选拷贝策略（见顶部说明） */
+at::Tensor adaptive_memcpy(const at::Tensor &t) {
     const size_t bytes =
         static_cast<size_t>(t.numel()) * static_cast<size_t>(t.element_size());
-    if (bytes <= snapshot_serial_max())
-        return snap_memcpy(t);
-    return snap_affinity(t);
+    if (bytes <= package_threshold_mt())
+        return memcpy_st(t);
+    return memcpy_mt(t);
 }
 
 /* 进程内一次的诊断输出：分段阈值 + 收敛上限 + 宿主池超配预警 */
@@ -202,9 +189,9 @@ static void log_clone_census() {
         const int real = (bound <= 0 || quota <= 0) ? bound : std::max(1, std::min(bound, quota));
         const int host = at::get_num_threads();
         std::fprintf(stderr,
-                     "[KuCCL] snapshot: serial_max=%zuB cap=%d (bound=%d, quota=%d, "
+                     "[KuCCL] memcpy: threshold_mt=%zuB cap=%d (bound=%d, quota=%d, "
                      "real=%d; host torch pool=%d)\n",
-                     snapshot_serial_max(), clone_thread_cap(), bound, quota, real, host);
+                     package_threshold_mt(), clone_thread_cap(), bound, quota, real, host);
         if (real > 0 && host > real * 2)
             std::fprintf(stderr,
                          "[KuCCL] WARNING: host thread pool %d >> real cpus %d; "
@@ -308,6 +295,9 @@ int store_oob_allgather_cb(const void *sendbuf, void *recvbuf, int count, void *
 BackendKuccl::BackendKuccl(c10::intrusive_ptr<Store> store, int rank, int world_size,
                            std::chrono::milliseconds /*timeout*/)
     : Backend(rank, world_size), store_(std::move(store)) {
+    /* 拷贝分段诊断（进程内一次：真实核数 + 宿主池超配预警） */
+    log_clone_census();
+
     /* Store OOB 上下文（含 ws/rank 提示，回调时用）—— 直接成员，随 this 存活 */
     store_oob_.store = store_.get();
     store_oob_.rank_hint = rank;
@@ -508,7 +498,7 @@ c10::intrusive_ptr<Work> BackendKuccl::allreduce(std::vector<at::Tensor> &tensor
         at::Tensor sendbuf; /* clone 路径才持有副本 */
         void *send_ptr = t.data_ptr();
         if (!allreduce_inplace_enabled()) {
-            sendbuf = input_snapshot(t);
+            sendbuf = adaptive_memcpy(t);
             send_ptr = sendbuf.data_ptr();
         }
         kucclRequest_t req = nullptr;
@@ -560,7 +550,7 @@ c10::intrusive_ptr<Work> BackendKuccl::allreduce(std::vector<at::Tensor> &tensor
     at::Tensor sendbuf; /* clone 路径才持有副本 */
     void *send_ptr = flat.data_ptr();
     if (!allreduce_inplace_enabled()) {
-        sendbuf = input_snapshot(flat);
+        sendbuf = adaptive_memcpy(flat);
         send_ptr = sendbuf.data_ptr();
     }
 
