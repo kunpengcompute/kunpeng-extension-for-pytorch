@@ -87,6 +87,7 @@ extern std::recursive_mutex g_api_lock;
 
 /* 错误信息记录（定义在 error.cpp，TLS 存储）——失败路径调用 */
 void err_record(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+void err_clear(void); /* 清空本线程错误历史（成功路径调用，保证 last= 语义新鲜） */
 const char *err_peek_last();
 void err_append(const char *ctx);
 

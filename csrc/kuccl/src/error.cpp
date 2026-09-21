@@ -66,6 +66,18 @@ void err_record(const char *fmt, ...) {
         ++ring.count;
 }
 
+/* 清空本线程错误历史（成功路径调用）：
+ * 保证 kucclGetLastError 的语义严格为"自上次成功以来的失败"，
+ * 不残留跨算子的旧错误误导排查。 */
+void err_clear(void)
+{
+    ErrRing &ring = tls_ring();
+    ring.count = 0;
+    ring.next = 0;
+    for (auto &slot : ring.slots)
+        slot.used = false;
+}
+
 /* 取最近一条并清空（kucclGetLastError 用） */
 const char *err_take_last() {
     ErrRing &ring = tls_ring();
