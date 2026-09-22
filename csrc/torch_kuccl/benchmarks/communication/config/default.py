@@ -15,7 +15,6 @@ MASTER_NODE = None
 
 # ── 代码 ──────────────────────────────────────────────────────
 REPO_DIR = "/root/pacific_ext/w30084706/kuccl"          # 各节点上的仓库路径
-REPO_URL = "https://atomgit.com/W-ayang/test.git"       # git 同步模式的仓库地址
 
 # ── 传输 ──────────────────────────────────────────────────────
 TLS_SINGLE = "sm,self"     # 单机默认 UCX_TLS（需 hucx 构建启用 sm 组件）
@@ -28,4 +27,4 @@ RETRANS_NICS = ["roh0", "roh1", "roh2", "roh3",
                 "roh4", "roh5", "roh6", "roh7"]   # ethtool -S 重传计数网卡
 
 # ── sync（开发机 → master）────────────────────────────────────
-SYNC_SRC = "/root/pacific_ext/w30084706/kuccl"      # 开发机上仓库路径（信息档）
+# 各节点 git 同步走节点克隆自带的 origin 远端；rsync 分发以 REPO_DIR 为目标
