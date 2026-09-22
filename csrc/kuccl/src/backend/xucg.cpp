@@ -20,12 +20,17 @@
 #include <ucp/api/ucp.h>
 #include <ucg/api/ucg.h>
 
+#include <dirent.h>
+#include <sched.h>
+
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <map>
 #include <new>
 #include <unistd.h>
 #include <vector>
@@ -50,10 +55,26 @@ struct XucgGlobal {
     uint8_t *world_addrs = nullptr;
     size_t *world_addr_lens = nullptr;
     size_t max_addr_len = 0;
+    /* 进程拓扑：主机哈希（OOB 交换）→ 节点表（node_id 按首次出现顺序编号）
+     * 与本节点 PPN——经 get_proc_info 的 location.node_id 喂 UCG（算法选择
+     * 的唯一拓扑入口；num_local_procs 仅作 UCX estimated_num_ppn 提示） */
+    std::vector<uint64_t> host_hash;
+    std::vector<int32_t> node_id;
+    int32_t nnode = 0; /* 节点数（topology_ok 时有效；诊断用） */
+    std::vector<int32_t> socket_id; /* NUMA 节点号（socket_ok 时有效，稠密化） */
+    int32_t nsocket = 0;
+    bool socket_ok = false; /* NUMA 全组一致有效（任一 rank 探测失败则全组不喂） */
+    uint32_t num_local_procs = 0;
+    bool topology_ok = false; /* node_id 表有效且全组一致（失败全组降级平铺） */
     bool initialized = false;
 };
 
 XucgGlobal g_xucg;
+
+/* UCG 拓扑消费计数（诊断）：get_proc_info 总调用数 / 其中带 node_id 上报的数。
+ * ucg_group_create 返回后读一次——两个数相等且 >0 即证明 UCG 真的取走了拓扑 */
+std::atomic<int> g_topo_queries{0};
+std::atomic<int> g_topo_reported{0};
 
 /* 后端私有通信域状态（挂在 kucclComm::be_ctx）。
  * 生命周期：process_init 分配（ucg_init 的 oob_group cookie 需要），
@@ -133,6 +154,80 @@ void xucg_fnv1a_feed_u64(uint32_t *hash, uint64_t value) {
     }
 }
 
+/* 主机名 FNV-1a 哈希：同节点进程得到相同值（进程拓扑分组的依据） */
+uint64_t xucg_host_hash() {
+    char host[256] = {0};
+    if (::gethostname(host, sizeof(host) - 1) != 0)
+        return 0;
+    uint64_t h = 1469598103934665603ULL;
+    for (const char *p = host; *p != '\0'; ++p) {
+        h ^= static_cast<uint8_t>(*p);
+        h *= 1099511628211ULL;
+    }
+    return h;
+}
+
+/* NUMA 节点探测：调用线程亲和性 CPU 集合 ∩ 各 NUMA 节点 cpulist，
+ * 取交集最大的节点号；探测失败返回 -1（调用方据此全组一致降级） */
+int32_t xucg_detect_numa() {
+    cpu_set_t set;
+    if (sched_getaffinity(0, sizeof(set), &set) != 0)
+        return -1;
+    DIR *d = opendir("/sys/devices/system/node");
+    if (d == nullptr)
+        return -1;
+    int32_t best = -1, best_cnt = 0;
+    struct dirent *e = nullptr;
+    char path[96], buf[1024];
+    while ((e = readdir(d)) != nullptr) {
+        int n = -1;
+        if (sscanf(e->d_name, "node%d", &n) != 1 || n < 0)
+            continue;
+        snprintf(path, sizeof(path), "/sys/devices/system/node/node%d/cpulist", n);
+        FILE *f = std::fopen(path, "r");
+        if (f == nullptr)
+            continue;
+        std::memset(buf, 0, sizeof(buf));
+        const char *got = std::fgets(buf, sizeof(buf), f);
+        std::fclose(f);
+        if (got == nullptr)
+            continue;
+        int cnt = 0;
+        for (char *tok = std::strtok(buf, ","); tok != nullptr;
+             tok = std::strtok(nullptr, ",")) {
+            int lo = -1, hi = -1;
+            if (std::sscanf(tok, "%d-%d", &lo, &hi) == 2) {
+                if (lo > hi)
+                    continue;
+                hi = std::min(hi, CPU_SETSIZE - 1);
+                for (int c = std::max(lo, 0); c <= hi; ++c)
+                    if (CPU_ISSET(c, &set))
+                        ++cnt;
+            } else if (std::sscanf(tok, "%d", &lo) == 1) {
+                if (lo >= 0 && lo < CPU_SETSIZE && CPU_ISSET(lo, &set))
+                    ++cnt;
+            }
+        }
+        if (cnt > best_cnt) {
+            best_cnt = cnt;
+            best = n;
+        }
+    }
+    closedir(d);
+    return best_cnt > 0 ? best : -1;
+}
+
+/* 进程拓扑喂入开关（KUCCL_TOPOLOGY，默认 on）：
+ * on  = 主机名哈希 OOB 交换喂 node_id（UCG 节点感知算法的输入）
+ * off = 平铺模型（KUCCL_TOPOLOGY=0，A/B 对照 / 回退用） */
+static bool topology_enabled() {
+    static const bool v = [] {
+        const char *e = std::getenv("KUCCL_TOPOLOGY");
+        return e == nullptr || e[0] == '\0' || std::strcmp(e, "0") != 0;
+    }();
+    return v;
+}
+
 /* ════════════════════════════════════════════════════════════
  * UCG 回调
  * ════════════════════════════════════════════════════════════*/
@@ -207,13 +302,31 @@ void *xucg_get_ucp_context(void *) {
     return static_cast<void *>(g_xucg.ucp_context);
 }
 
-ucg_status_t xucg_get_proc_info_stub(ucg_rank_t, ucg_proc_info_t **proc) {
+/* 进程拓扑查询：UCG 规划节点感知算法时回调（ctx 进程序 = 首通信域 rank 空间；
+ * 子组经各 group 的 rank_map 映射回该空间查询）。
+ * node_id 仅在拓扑交换成功（topology_ok，全组一致）时上报——UCG 的 locations[]
+ * 用 malloc 分配、仅对上报者赋值，部分上报会被当数组下标用（越界写），
+ * 因此必须全组同报或同不报。 */
+ucg_status_t xucg_get_proc_info(ucg_rank_t rank, ucg_proc_info_t **proc) {
+    if (proc == nullptr)
+        return UCG_ERR_INVALID_PARAM;
     *proc = static_cast<ucg_proc_info_t *>(std::malloc(sizeof(ucg_proc_info_t)));
-    if (!*proc)
+    if (*proc == nullptr)
         return UCG_ERR_NO_MEMORY;
-    std::memset(*proc, 0, sizeof(ucg_proc_info_t));
+    std::memset(*proc, 0, sizeof(**proc));
     (*proc)->size = sizeof(ucg_proc_info_t);
     (*proc)->num_addr_desc = 0;
+    g_topo_queries.fetch_add(1, std::memory_order_relaxed);
+    if (g_xucg.topology_ok && rank >= 0 &&
+        static_cast<uint32_t>(rank) < g_xucg.node_id.size()) {
+        g_topo_reported.fetch_add(1, std::memory_order_relaxed);
+        (*proc)->location.field_mask = UCG_LOCATION_FIELD_NODE_ID;
+        (*proc)->location.node_id = g_xucg.node_id[static_cast<uint32_t>(rank)];
+        if (g_xucg.socket_ok && rank < static_cast<ucg_rank_t>(g_xucg.socket_id.size())) {
+            (*proc)->location.field_mask |= UCG_LOCATION_FIELD_SOCKET_ID;
+            (*proc)->location.socket_id = g_xucg.socket_id[static_cast<uint32_t>(rank)];
+        }
+    }
     return UCG_OK;
 }
 
@@ -335,6 +448,109 @@ kucclResult_t xucg_process_init_once(kucclComm *world_comm) {
     if (xucg_build_world_addr_table(world_comm) != KUCCL_SUCCESS)
         return KUCCL_FAIL;
 
+    /* (d2) 进程拓扑（KUCCL_TOPOLOGY=0 可关，默认开）：主机名哈希 OOB 交换。
+     * 不做任何"按 rank 推算节点"的假设（一机多作业 / 进程数不均 / 换 launcher
+     * 都会使 rank/ppn 推算出错，猜错比不喂更糟——UCG 会按错误边界建组）；
+     * LOCAL_WORLD_SIZE 只作交叉校验告警，不作数据源。
+     * UCG 要求拓扑全组同报或同不报（其 locations[] 为 malloc 分配、仅对
+     * 上报者赋值，部分上报的未初始化 node_id 会被当数组下标用导致越界写），
+     * 故加一轮 1 字节全组表决：任一 rank 交换失败 → 全组统一降级平铺。 */
+    g_xucg.topology_ok = false;
+    if (topology_enabled()) {
+        const uint64_t my_hash = xucg_host_hash();
+        std::vector<uint64_t> hashes(static_cast<std::size_t>(ws));
+        const bool hash_ok =
+            detail::oob_exchange(&world_comm->oob_config, &my_hash, hashes.data(),
+                                 static_cast<int>(sizeof(uint64_t))) == 0;
+
+        /* NUMA（socket）交换：与 node_id 同源的全组一致原则——任一 rank
+         * 探测失败（发 -1）→ 全组不喂 socket（UCG 的 socket 数组仅对
+         * 上报者赋值，部分上报 = 未初始化值被当数组下标用）。
+         * 探测失败不影响 node_id 的喂入；NUMA 交换失败计入表决。 */
+        std::vector<int32_t> numa(static_cast<std::size_t>(ws), -1);
+        const int32_t my_numa = xucg_detect_numa();
+        const bool numa_xchg_ok =
+            detail::oob_exchange(&world_comm->oob_config, &my_numa, numa.data(),
+                                 static_cast<int>(sizeof(int32_t))) == 0;
+        bool numa_ok_all = numa_xchg_ok;
+        for (int i = 0; numa_ok_all && i < ws; ++i)
+            numa_ok_all = numa[static_cast<std::size_t>(i)] >= 0;
+
+        /* 表决轮：哈希交换与 NUMA 交换都成功的 rank 投 1 → 全组一致决策 */
+        const uint8_t my_vote = (hash_ok && numa_xchg_ok) ? 1 : 0;
+        std::vector<uint8_t> votes(static_cast<std::size_t>(ws));
+        const bool vote_ok =
+            detail::oob_exchange(&world_comm->oob_config, &my_vote, votes.data(), 1) == 0;
+        bool all_ok = (hash_ok && numa_xchg_ok) && vote_ok;
+        for (int i = 0; all_ok && i < ws; ++i)
+            all_ok = votes[static_cast<std::size_t>(i)] != 0;
+
+        if (!all_ok) {
+            KUCCL_LOG_ERROR(rank,
+                            "topology exchange/vote FAILED — degrade to flat model "
+                            "(group-consistent)");
+        } else {
+            g_xucg.host_hash = std::move(hashes);
+            g_xucg.node_id.assign(static_cast<std::size_t>(ws), 0);
+            /* 按"首次出现的顺序"给每个主机名编一个 node_id */
+            std::map<uint64_t, int32_t> first_seen;
+            int32_t next_node = 0;
+            for (int i = 0; i < ws; ++i) {
+                auto ins =
+                    first_seen.emplace(g_xucg.host_hash[static_cast<std::size_t>(i)], next_node);
+                g_xucg.node_id[static_cast<std::size_t>(i)] = ins.first->second;
+                if (ins.second)
+                    ++next_node;
+            }
+            g_xucg.num_local_procs = 0;
+            for (int i = 0; i < ws; ++i)
+                if (g_xucg.host_hash[static_cast<std::size_t>(i)] == my_hash)
+                    ++g_xucg.num_local_procs;
+            g_xucg.topology_ok = true;
+            g_xucg.nnode = static_cast<int32_t>(first_seen.size());
+            if (numa_ok_all) {
+                /* socket_id：NUMA 节点号按首次出现顺序稠密化 */
+                g_xucg.socket_id.assign(static_cast<std::size_t>(ws), 0);
+                std::map<int32_t, int32_t> first_socket;
+                int32_t next_socket = 0;
+                for (int i = 0; i < ws; ++i) {
+                    auto ins =
+                        first_socket.emplace(numa[static_cast<std::size_t>(i)], next_socket);
+                    g_xucg.socket_id[static_cast<std::size_t>(i)] = ins.first->second;
+                    if (ins.second)
+                        ++next_socket;
+                }
+                g_xucg.nsocket = next_socket;
+                g_xucg.socket_ok = true;
+            }
+            if (g_xucg.socket_ok) {
+                KUCCL_LOG_INFO(rank,
+                               "topology(src=host-hash): nodes=%d ppn=%u sockets=%d "
+                               "my_node=%d my_socket=%d",
+                               static_cast<int>(first_seen.size()), g_xucg.num_local_procs,
+                               g_xucg.nsocket, g_xucg.node_id[static_cast<std::size_t>(rank)],
+                               g_xucg.socket_id[static_cast<std::size_t>(rank)]);
+            } else {
+                KUCCL_LOG_INFO(rank,
+                               "topology(src=host-hash): nodes=%d ppn=%u my_node=%d "
+                               "(socket not fed)",
+                               static_cast<int>(first_seen.size()), g_xucg.num_local_procs,
+                               g_xucg.node_id[static_cast<std::size_t>(rank)]);
+            }
+            /* 交叉校验（仅告警不作数据源）：torchrun 注入值与实测不一致
+             * 说明 hostname 碰撞或一机多作业——拓扑仍以实测为准 */
+            if (const char *lws = std::getenv("LOCAL_WORLD_SIZE")) {
+                const long hint = std::atol(lws);
+                if (hint > 0 && static_cast<unsigned long>(hint) != g_xucg.num_local_procs)
+                    KUCCL_LOG_ERROR(rank,
+                                    "topology MISMATCH: LOCAL_WORLD_SIZE=%ld but "
+                                    "host-hash ppn=%u (hash collision or multi-job "
+                                    "per host?)",
+                                    hint, g_xucg.num_local_procs);
+            }
+        }
+    }
+
     /* (e) UCG global init — 注入 UCP 资源回调（ucg 编程模型） */
     ucg_global_params_t gp;
     std::memset(&gp, 0, sizeof(gp));
@@ -358,7 +574,7 @@ kucclResult_t xucg_process_init_once(kucclComm *world_comm) {
     cp.oob_group.size = static_cast<uint32_t>(ws);
     cp.oob_group.group = world_comm->be_ctx;
     cp.thread_mode = UCG_THREAD_MODE_SINGLE;
-    cp.get_proc_info = xucg_get_proc_info_stub;
+    cp.get_proc_info = xucg_get_proc_info;
 
     ucg_config_h ucfg = nullptr;
     if (ucg_config_read(NULL, NULL, &ucfg) != UCG_OK) {
