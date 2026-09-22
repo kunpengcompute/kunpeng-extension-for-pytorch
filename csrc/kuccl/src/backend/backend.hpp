@@ -1,5 +1,5 @@
-#ifndef KUCCL_BACKEND_HPP_
-#define KUCCL_BACKEND_HPP_
+#ifndef KuCCL_BACKEND_HPP_
+#define KuCCL_BACKEND_HPP_
 
 /*
  * kuccl 后端接口（双后端架构）
@@ -58,7 +58,7 @@ struct Ops {
     const char *name;
 
     /* 进程级一次性资源（UCP/UCG 上下文、地址交换等）。首次建组时调用，
-     * 后端内部保证幂等。失败返回 KUCCL_FAIL 并已记录错误信息。 */
+     * 后端内部保证幂等。失败返回 KuCCL_FAIL 并已记录错误信息。 */
     kucclResult_t (*process_init)(kucclComm *comm);
 
     /* 进程级终结（kuccl::finalize 调用，进程退出前） */
@@ -100,4 +100,4 @@ const Ops *kupl_ops();
 } /* namespace backend */
 } /* namespace kuccl */
 
-#endif /* KUCCL_BACKEND_HPP_ */
+#endif /* KuCCL_BACKEND_HPP_ */

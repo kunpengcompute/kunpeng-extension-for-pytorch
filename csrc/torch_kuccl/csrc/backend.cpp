@@ -1,5 +1,5 @@
 /*
- * KUCCL Backend 实现 —— c10d::BackendKuccl
+ * KuCCL Backend 实现 —— c10d::BackendKuccl
  *
  * 类声明在 include/kuccl/backend.hpp；PYBIND11_MODULE 在文件末尾；
  * __attribute__((constructor)) 自动注册（import 即注册）。
@@ -11,7 +11,7 @@
  *   broadcast  → kucclBroadcast
  *   alltoall   → kucclAllToAll（等长直调；变长 split 不支持）
  *   send/recv  → 不支持（只有 4 个集合接口，见 kuccl.h）
- *   barrier    → 1 字节 allreduce / KUCCL_BARRIER=store 回退
+ *   barrier    → 1 字节 allreduce / TORCH_KUCCL_BARRIER=store 回退
  *
  * C API 是异步的，Backend 期望阻塞：启动 request 后用 kucclTest 循环等完成。
  */
@@ -19,6 +19,7 @@
 #include "backend.hpp" // 本包头文件（适配层，torch 依赖在这）
 
 #include <torch/csrc/Exceptions.h> // TORCH_WARN（后端自动回退提示）
+#include <ATen/Parallel.h>         // at::get/set_num_threads（clone 前后收敛/恢复）
 
 #include <kuccl.h> // libkuccl 的对外 C 接口（零 torch）
 
@@ -27,12 +28,17 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <memory>
 #include <string>
 #include <vector>
+
+#if defined(__linux__)
+#include <sched.h> // sched_getaffinity / cpu_set_t（CPU census）
+#endif
 
 #include "oob.hpp" // Store 版 OOB 工具（适配层私有）
 
@@ -41,10 +47,10 @@ namespace c10d {
 namespace {
 
 /* allreduce 默认 clone 一份 sendbuf（输入独立快照，正确性与底层算法
- * 实现解耦）。KUCCL_ALLREDUCE_INPLACE=1 时原地（sendbuff==recvbuff）。 */
+ * 实现解耦）。TORCH_KUCCL_ALLREDUCE_INPLACE=1 时原地（sendbuff==recvbuff）。 */
 bool allreduce_inplace_enabled() {
     static const bool v = [] {
-        const char *e = std::getenv("KUCCL_ALLREDUCE_INPLACE");
+        const char *e = std::getenv("TORCH_KUCCL_ALLREDUCE_INPLACE");
         return e != nullptr && e[0] != '\0' && std::strcmp(e, "0") != 0;
     }();
     return v;
@@ -203,11 +209,10 @@ static void log_clone_census() {
     (void)once;
 }
 
-
-/* barrier 走 1 字节 allreduce；KUCCL_BARRIER=store 回退 TCPStore 版。 */
+/* barrier 走 1 字节 allreduce；TORCH_KUCCL_BARRIER=store 回退 TCPStore 版。 */
 bool barrier_use_store() {
     static const bool v = [] {
-        const char *e = std::getenv("KUCCL_BARRIER");
+        const char *e = std::getenv("TORCH_KUCCL_BARRIER");
         return e != nullptr && std::strcmp(e, "store") == 0;
     }();
     return v;
@@ -295,7 +300,7 @@ int store_oob_allgather_cb(const void *sendbuf, void *recvbuf, int count, void *
 BackendKuccl::BackendKuccl(c10::intrusive_ptr<Store> store, int rank, int world_size,
                            std::chrono::milliseconds /*timeout*/)
     : Backend(rank, world_size), store_(std::move(store)) {
-    /* 拷贝分段诊断（进程内一次：真实核数 + 宿主池超配预警） */
+    /* clone 收敛线程数诊断（进程内一次：真实核数 + 宿主池超配预警） */
     log_clone_census();
 
     /* Store OOB 上下文（含 ws/rank 提示，回调时用）—— 直接成员，随 this 存活 */
@@ -311,7 +316,7 @@ BackendKuccl::BackendKuccl(c10::intrusive_ptr<Store> store, int rank, int world_
         const std::string call_prefix = "kuccl_uid_" + std::to_string(rnd) + "_";
         if (rank == 0) {
             kucclResult_t r = kucclGetUniqueId(&uniqueId);
-            TORCH_CHECK(r == KUCCL_SUCCESS, "kucclGetUniqueId failed (result=", (int)r, ")");
+            TORCH_CHECK(r == KuCCL_SUCCESS, "kucclGetUniqueId failed (result=", (int)r, ")");
         }
         std::vector<char> id_recv(static_cast<size_t>(world_size) * sizeof(uniqueId), 0);
         kuccl::oob_allgather(store_oob_.store, &uniqueId, id_recv.data(), rank, world_size,
@@ -327,7 +332,7 @@ BackendKuccl::BackendKuccl(c10::intrusive_ptr<Store> store, int rank, int world_
     config.oob_ctx = static_cast<void *>(&store_oob_);
 
     /* 3. 后端自动选择：单机（LOCAL_WORLD_SIZE == WORLD_SIZE，torchrun 注入）
-     *    自动走 kupl shm 快路径；用户显式设了 KUCCL_BACKEND_TYPE 则完全尊重。
+     *    自动走 kupl shm 快路径；显式设置 KUCCL_BACKEND_TYPE 时以用户设置为准。
      *    KUPL 未编入/不可用时自动回退 xucg（见下方重试）。 */
     bool auto_kupl = false;
     {
@@ -344,13 +349,13 @@ BackendKuccl::BackendKuccl(c10::intrusive_ptr<Store> store, int rank, int world_
 
     /* 4. 创建通信域（自动选中的 kupl 不可用时回退 xucg 重建） */
     kucclResult_t r = kucclCommInitRankConfig(&comm_, world_size, uniqueId, rank, &config);
-    if (r != KUCCL_SUCCESS && auto_kupl) {
+    if (r != KuCCL_SUCCESS && auto_kupl) {
         TORCH_WARN("kuccl: kupl backend unavailable (not built in or init failed), "
                    "falling back to xucg");
         config.backend = "xucg";
         r = kucclCommInitRankConfig(&comm_, world_size, uniqueId, rank, &config);
     }
-    TORCH_CHECK(r == KUCCL_SUCCESS, "kucclCommInitRankConfig failed (result=", (int)r, ")");
+    TORCH_CHECK(r == KuCCL_SUCCESS, "kucclCommInitRankConfig failed (result=", (int)r, ")");
     comm_ready_ = true;
 }
 
@@ -401,11 +406,21 @@ BackendKuccl::allgather(std::vector<std::vector<at::Tensor>> &outputTensors,
     kucclRequest_t req = nullptr;
     kucclResult_t r = kucclAllGather(input.data_ptr(), recv.data_ptr(), static_cast<size_t>(count),
                                      dt, comm_, &req);
-    TORCH_CHECK(r == KUCCL_SUCCESS, "kucclAllGather start failed (result=", (int)r, ")");
-    /* 真异步：立即返回 Work；拆回拷贝作为 finisher（完成时执行） */
+    TORCH_CHECK(r == KuCCL_SUCCESS, "kucclAllGather start failed (result=", (int)r,
+                 ", last=", kucclGetLastError(), ")");
+    /* 真异步：立即返回 Work；拆回拷贝作为 finisher（完成时执行）。
+     * 快路径用 memcpy：contiguous 输出直接拷——绕过 copy_ 的
+     * TensorIterator 派发（ws=128 时每轮省 128 次派发开销）。 */
     auto finisher = [ws, count, recv, outList]() {
+        const char *base = static_cast<const char *>(recv.data_ptr());
+        const size_t bytes = static_cast<size_t>(count) * recv.element_size();
         for (int i = 0; i < ws; ++i) {
-            outList[i].copy_(recv.narrow(0, i * count, count).view_as(outList[i]));
+            const at::Tensor &out = outList[i];
+            if (out.is_contiguous() && out.numel() == count) {
+                std::memcpy(out.data_ptr(), base + static_cast<size_t>(i) * bytes, bytes);
+            } else {
+                out.copy_(recv.narrow(0, static_cast<int64_t>(i) * count, count).view_as(out));
+            }
         }
     };
     return c10::make_intrusive<WorkKuccl>(req, comm_, std::vector<at::Tensor>{}, OpType::ALLGATHER,
@@ -443,7 +458,7 @@ c10::intrusive_ptr<Work> BackendKuccl::_allgather_base(at::Tensor &outputBuffer,
     kucclRequest_t req = nullptr;
     kucclResult_t r =
         kucclAllGather(input.data_ptr(), outputBuffer.data_ptr(), count, dt, comm_, &req);
-    TORCH_CHECK(r == KUCCL_SUCCESS, "kuccl _allgather_base start failed: rank=", getRank(),
+    TORCH_CHECK(r == KuCCL_SUCCESS, "kuccl _allgather_base start failed: rank=", getRank(),
                 ", count=", count, ", world_size=", world_size);
     /* 异步保活：input 可能是 contiguous() 的临时副本，outputBuffer 是写目标 */
     return make_async_work(req, comm_, {input, outputBuffer}, OpType::ALLGATHER);
@@ -464,7 +479,8 @@ c10::intrusive_ptr<Work> BackendKuccl::broadcast(std::vector<at::Tensor> &tensor
     /* PyTorch broadcast 是原地操作：root 的数据既是源也是目的，sendbuff 与 recvbuff 同址 */
     kucclRequest_t req = nullptr;
     kucclResult_t r = kucclBroadcast(t.data_ptr(), t.data_ptr(), count, dt, root, comm_, &req);
-    TORCH_CHECK(r == KUCCL_SUCCESS, "kucclBroadcast start 失败 (result=", (int)r, ")");
+    TORCH_CHECK(r == KuCCL_SUCCESS, "kucclBroadcast start 失败 (result=", (int)r,
+                 ", last=", kucclGetLastError(), ")");
     /* 异步保活：原地操作，UCG 在飞期间读写 t */
     return make_async_work(req, comm_, {t}, OpType::BROADCAST);
 }
@@ -503,7 +519,8 @@ c10::intrusive_ptr<Work> BackendKuccl::allreduce(std::vector<at::Tensor> &tensor
         }
         kucclRequest_t req = nullptr;
         kucclResult_t r = kucclAllReduce(send_ptr, t.data_ptr(), count, dt, op, comm_, &req);
-        TORCH_CHECK(r == KUCCL_SUCCESS, "kucclAllReduce start failed (result=", (int)r, ")");
+        TORCH_CHECK(r == KuCCL_SUCCESS, "kucclAllReduce start failed (result=", (int)r,
+                 ", last=", kucclGetLastError(), ")");
         /* 异步保活：t 是写目标；sendbuf（clone 路径）是读源——
          * 离开作用域后 UCG 仍在访问其内存，必须随 Work 存活 */
         std::vector<at::Tensor> keep;
@@ -546,24 +563,35 @@ c10::intrusive_ptr<Work> BackendKuccl::allreduce(std::vector<at::Tensor> &tensor
         }
     }
 
-    /* 1 次 allreduce 通信 */
-    at::Tensor sendbuf; /* clone 路径才持有副本 */
-    void *send_ptr = flat.data_ptr();
-    if (!allreduce_inplace_enabled()) {
-        sendbuf = adaptive_memcpy(flat);
-        send_ptr = sendbuf.data_ptr();
+    /* 1 次 allreduce 通信。
+     * 与单 tensor 路径的关键差别：flat 是适配层私有 buffer，不与用户
+     * tensor 别名——send 纯读、recv 用独立 buffer 纯写，天然无 WAR，
+     * 不需要 adaptive_memcpy 的隔离拷贝。全量拷贝从 3 次（拼/快照/拆）
+     * 降为 2 次（拼/拆）。
+     * TORCH_KUCCL_ALLREDUCE_INPLACE=1 实验开关：recv 复用 flat（省一次分配，
+     * 依赖 UCG 算法层原地保证，默认不开）。 */
+    at::Tensor recvbuf;
+    void *recv_ptr = nullptr;
+    if (allreduce_inplace_enabled()) {
+        recv_ptr = flat.data_ptr();
+    } else {
+        recvbuf = at::empty({total_numel}, tensors[0].options());
+        recv_ptr = recvbuf.data_ptr();
     }
 
     kucclRequest_t req = nullptr;
-    kucclResult_t r = kucclAllReduce(send_ptr, flat.data_ptr(), static_cast<size_t>(total_numel),
+    kucclResult_t r = kucclAllReduce(flat.data_ptr(), recv_ptr, static_cast<size_t>(total_numel),
                                      dt, op, comm_, &req);
-    TORCH_CHECK(r == KUCCL_SUCCESS, "kuccl allreduce_coalesced start failed (result=", (int)r, ")");
-    /* 真异步：拆回拷贝作为 finisher；sendbuf/flat 由 tensors_ 保活 */
-    auto finisher = [tensors, flat, offsets, elem_size]() {
+    TORCH_CHECK(r == KuCCL_SUCCESS, "kuccl allreduce_coalesced start failed (result=", (int)r, ")");
+    /* 真异步：拆回拷贝作为 finisher（读源 = 归约结果所在 buffer）；
+     * flat/recvbuf 由 tensors_ 保活 */
+    const bool inplace = !recvbuf.defined();
+    at::Tensor result_src = inplace ? flat : recvbuf;
+    auto finisher = [tensors, result_src, offsets, elem_size]() {
         for (size_t i = 0; i < tensors.size(); ++i) {
             if (tensors[i].numel() > 0) {
                 std::memcpy(tensors[i].data_ptr(),
-                            static_cast<const char *>(flat.data_ptr()) + offsets[i] * elem_size,
+                            static_cast<const char *>(result_src.data_ptr()) + offsets[i] * elem_size,
                             static_cast<size_t>(tensors[i].numel()) * elem_size);
             }
         }
@@ -573,8 +601,8 @@ c10::intrusive_ptr<Work> BackendKuccl::allreduce(std::vector<at::Tensor> &tensor
     for (const auto &t : tensors)
         keep.push_back(t);
     keep.push_back(flat);
-    if (sendbuf.defined())
-        keep.push_back(sendbuf);
+    if (recvbuf.defined())
+        keep.push_back(recvbuf);
     return c10::make_intrusive<WorkKuccl>(req, comm_, std::move(keep), OpType::ALLREDUCE,
                                           std::move(finisher));
 }
@@ -688,7 +716,7 @@ c10::intrusive_ptr<Work> BackendKuccl::alltoall_base(at::Tensor &outputBuffer,
         kucclRequest_t req = nullptr;
         kucclResult_t r = kucclAllToAll(input.data_ptr(), outputBuffer.data_ptr(), per_rank,
                                         kucclUint8, comm_, &req);
-        TORCH_CHECK(r == KUCCL_SUCCESS, "kucclAllToAll start failed: rank=", getRank(),
+        TORCH_CHECK(r == KuCCL_SUCCESS, "kucclAllToAll start failed: rank=", getRank(),
                     " (result=", (int)r, ")");
         /* 异步保活：input（可能 contiguous 临时）+ outputBuffer */
         return make_async_work(req, comm_, {input, outputBuffer}, OpType::ALLTOALL);
@@ -719,7 +747,7 @@ c10::intrusive_ptr<Work> BackendKuccl::recv(std::vector<at::Tensor> & /*tensors*
 
 /* ── barrier ──────────────────────────────────────────────
  * 用 1 字节 allreduce 实现屏障（语义等价，全员到达才完成）。
- * KUCCL_BARRIER=store 回退 TCPStore 版（排障用）。 */
+ * TORCH_KUCCL_BARRIER=store 回退 TCPStore 版（排障用）。 */
 c10::intrusive_ptr<Work> BackendKuccl::barrier(const BarrierOptions &) {
     if (!barrier_use_store() && comm_ready_ && getSize() > 1) {
         /* token 必须堆分配（异步期间栈帧会销毁，UCG 还在写它）——
@@ -728,7 +756,7 @@ c10::intrusive_ptr<Work> BackendKuccl::barrier(const BarrierOptions &) {
         token.fill_(1);
         kucclRequest_t req = nullptr;
         if (kucclAllReduce(token.data_ptr(), token.data_ptr(), 1, kucclUint8, kucclSum, comm_,
-                           &req) == KUCCL_SUCCESS) {
+                           &req) == KuCCL_SUCCESS) {
             return make_async_work(req, comm_, {token}, OpType::BARRIER);
         }
         /* allreduce 启动失败 → 落回 Store 版，保证 barrier 语义可用 */
@@ -754,7 +782,7 @@ BackendKuccl::createBackendKuccl(const c10::intrusive_ptr<Store> &store, int ran
  * 用户只需 `import kuccl` 即可，无需手动 register_backend。
  * ════════════════════════════════════════════════════════════*/
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-    m.doc() = "KUCCL (UCX + UCG) PyTorch Backend V2 — auto-registered on import";
+    m.doc() = "KuCCL (UCX + UCG) PyTorch Backend V2 — auto-registered on import";
     m.def("create_kuccl_backend", &c10d::BackendKuccl::createBackendKuccl, py::arg("store"),
           py::arg("rank"), py::arg("world_size"), py::arg("timeout"));
 }

@@ -2,7 +2,7 @@
  * error.cpp —— 错误信息基础设施
  *
  *   - 线程局部存储（TLS）最近一次错误详文——多线程各自独立
- *   - KUCCL_FAIL 返回后用户可查具体原因（算子/参数/UCG 状态码）
+ *   - KuCCL_FAIL 返回后用户可查具体原因（算子/参数/UCG 状态码）
  *   - 成功路径零开销（只在失败时写入）
  *
  * 设计：
@@ -66,6 +66,18 @@ void err_record(const char *fmt, ...) {
         ++ring.count;
 }
 
+/* 清空本线程错误历史（成功路径调用）：
+ * 保证 kucclGetLastError 的语义严格为"自上次成功以来的失败"，
+ * 不残留跨算子的旧错误误导排查。 */
+void err_clear(void)
+{
+    ErrRing &ring = tls_ring();
+    ring.count = 0;
+    ring.next = 0;
+    for (auto &slot : ring.slots)
+        slot.used = false;
+}
+
 /* 取最近一条并清空（kucclGetLastError 用） */
 const char *err_take_last() {
     ErrRing &ring = tls_ring();
@@ -116,11 +128,11 @@ extern "C" {
  *     （一次性读取语义）
  *   - 线程安全：TLS 存储，每线程独立
  *   - 典型用法：
- *       if (kucclAllReduce(...) != KUCCL_SUCCESS) {
+ *       if (kucclAllReduce(...) != KuCCL_SUCCESS) {
  *           fprintf(stderr, "kuccl: %s\n", kucclGetLastError());
  *       }
  * ════════════════════════════════════════════════════════════*/
-KUCCL_API const char *kucclGetLastError() {
+KuCCL_API const char *kucclGetLastError() {
     return kuccl::detail::err_take_last();
 }
 

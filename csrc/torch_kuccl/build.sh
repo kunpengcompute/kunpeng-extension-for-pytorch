@@ -8,7 +8,7 @@
 # import kuccl 的依赖链（路径约定，勿破坏）：
 #   import kuccl
 #     → kuccl/__init__.py（ctypes 预加载 HUCX/XUCG 私有库）
-#     → kuccl_backend*.so（本目录，build_ext --inplace 产物）
+#     → kuccl/kuccl_backend*.so（包内，--inplace 产物）
 #       → libkuccl.so（../kuccl/build/，RPATH 绝对路径 + env.sh 的 LD_LIBRARY_PATH 双保险）
 #
 # 用法（在 torch_kuccl/ 目录执行）：
@@ -24,17 +24,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB_DIR="$(cd "${SCRIPT_DIR}/../kuccl" && pwd)"   # 库本体（兄弟目录）
 MODE="${1:-all}"
 
-# ── 环境：复用库目录的 env.sh（conda + HUCX/XUCG/BISHENG；同一套运行时栈）──
-if [[ "${CONDA_DEFAULT_ENV:-}" != "${KUCCL_CONDA_ENV:-kuccl291}" ]]; then
-    echo "[env] 未激活环境，自动 source ${LIB_DIR}/env.sh ..."
+# ── 环境：两个独立 env（仓库根 env.sh = PyTorch；kuccl/kuccl_env.sh = 库路径）──
+#   shellcheck disable=SC1091
+source "${LIB_DIR}/kuccl_env.sh"
+if [[ "${CONDA_DEFAULT_ENV:-}" != "${PYTORCH_ENV:-kuccl291}" ]]; then
+    echo "[env] 未激活 PyTorch 环境，自动 source 仓库根 env.sh ..."
     # shellcheck disable=SC1091
-    source "${LIB_DIR}/env.sh"
+    source "${SCRIPT_DIR}/../env.sh"
 fi
 
 if [[ "${MODE}" == "clean" ]]; then
     echo "── clean：清空 ${SCRIPT_DIR}/build 与旧 .so ..."
     rm -rf "${SCRIPT_DIR}/build"
-    rm -f "${SCRIPT_DIR}"/kuccl_backend*.so
+    rm -f "${SCRIPT_DIR}/kuccl/"kuccl_backend*.so
     MODE="all"
 fi
 
@@ -62,19 +64,27 @@ build_torch() {
     (
         set -e
         cd "${SCRIPT_DIR}"
-        # ★ 保留 build/（setup.py 的 .o 在里面，未改动的源文件直接跳过）；
-        #   只清旧 inplace .so——setup.py 见 .so 已存在会跳过链接
-        rm -f kuccl_backend*.so
+        # 无条件全量编译：distutils 只跟踪 .cpp→.o 时间戳、不跟踪头文件，
+        # 增量模式下改 include/*.hpp 会被静默跳过（旧 .o 直接链接出新 .so，
+        # 头文件改动全部丢失且无报错）。单文件全量一两分钟，买确定性。
+        rm -rf build
+        rm -f kuccl/kuccl_backend*.so
         CC="${BISHENG_PATH}/bin/clang" CXX="${BISHENG_PATH}/bin/clang++" \
             python setup.py build_ext --inplace
     ) || { echo "[torch_kuccl 失败] 往上翻看编译错误（当前目录未变）"; exit 1; }
 
     local SO
-    SO=$(ls "${SCRIPT_DIR}"/kuccl_backend*.so 2>/dev/null | head -1)
+    SO=$(ls "${SCRIPT_DIR}/kuccl/"kuccl_backend*.so 2>/dev/null | head -1)
     if [[ -z "$SO" ]]; then
         echo "[torch_kuccl 失败] 未生成 kuccl_backend*.so"; exit 1
     fi
     echo "[torch_kuccl 完成] ${SO}"
+
+    # 版本戳：源码 HEAD + 构建时间（benchmark 启动时与 git HEAD 比对防旧二进制）
+    {
+        git -C "${SCRIPT_DIR}" rev-parse --short HEAD 2>/dev/null || echo "unknown"
+        date '+%F %T'
+    } > "${SCRIPT_DIR}/kuccl/BUILD_INFO"
 
     # 门禁：import 全链路（ctypes 预加载 UCX/UCG + libkuccl + 注册 backend）
     echo ""
@@ -95,7 +105,7 @@ case "${MODE}" in
         echo ""
         echo "══════ 适配层构建完成 ══════"
         echo "快速验证:  python tests/correctness.py --world-size 2"
-        echo "性能对比:  python examples/benchmark.py --csv r.csv"
+        echo "性能跑分:  python benchmarks/communication/compare_nodes.py --nnodes 8 --ppn 16"
         ;;
     fmt)
         CF_BIN="${CLANG_FORMAT:-${BISHENG_PATH}/bin/clang-format}"

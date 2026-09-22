@@ -1,8 +1,8 @@
-#ifndef KUCCL_BACKEND_HPP_
-#define KUCCL_BACKEND_HPP_
+#ifndef KuCCL_BACKEND_HPP_
+#define KuCCL_BACKEND_HPP_
 
 /*
- * KUCCL PyTorch Backend 适配层
+ * KuCCL PyTorch Backend 适配层
  *
  *   import kuccl
  *   dist.init_process_group("kuccl", rank=0, world_size=1)
@@ -22,6 +22,8 @@
 #include <pybind11/chrono.h>
 
 #include <atomic>
+#include <cstdlib>
+#include <cstring>
 #include <functional>
 #include <string>
 #include <vector>
@@ -50,9 +52,8 @@ public:
      * finisher：完成时需要执行的收尾（如 allgather 列表式的拆回拷贝） */
     WorkKuccl(kucclRequest_t req, kucclComm_t comm, std::vector<at::Tensor> tensors,
               OpType opType = OpType::ALLGATHER, std::function<void()> finisher = nullptr)
-        : Work(-1, opType), req_(req), tensors_(std::move(tensors)), finisher_(std::move(finisher)),
-          done_(false), failed_(false) {
-        (void)comm; /* 不透明化后 Work 不持 worker；comm 仅构造期校验用 */
+        : Work(-1, opType), req_(req), comm_(comm), tensors_(std::move(tensors)),
+          finisher_(std::move(finisher)), done_(false), failed_(false) {
         future_ = c10::make_intrusive<c10::ivalue::Future>(c10::NoneType::get());
     }
 
@@ -112,10 +113,10 @@ private:
         if (done_.load(std::memory_order_acquire))
             return;
         int flag = 0;
-        kucclStatus_t st = KUCCL_STATUS_PENDING;
+        kucclStatus_t st = KuCCL_STATUS_PENDING;
         kucclRequest_t req = req_;
         kucclResult_t rc = kucclTest(&req, &flag, &st);
-        if (rc != KUCCL_SUCCESS && flag == 0) {
+        if (rc != KuCCL_SUCCESS && flag == 0) {
             /* 查询失败且未完成：区分"暂时失败"（下次再试）与
              * "致命失败"（comm 已销毁/aborted——继续轮询只会
              * 无限自旋，标记失败退出，对齐 watchdog 语义） */
@@ -128,16 +129,33 @@ private:
         fail_count_ = 0;
         if (flag == 1) {
             req_ = nullptr;
-            const bool ok = (st == KUCCL_STATUS_COMPLETE);
+            const bool ok = (st == KuCCL_STATUS_COMPLETE);
             if (ok && finisher_) {
                 finisher_(); /* 完成时收尾（如 allgather 拆回拷贝） */
+            }
+            /* TORCH_KUCCL_FLUSH=1：每轮集合完成后 flush worker（对齐阻塞式
+             * 实现的轮间落定语义；默认关——flush 有等待成本） */
+            if (ok && flush_enabled() && comm_ != nullptr) {
+                kucclFlushComm(comm_);
             }
             done_.store(true, std::memory_order_release);
             failed_.store(!ok, std::memory_order_release);
         }
     }
 
+    static bool flush_enabled() {
+        static const bool v = [] {
+            /* 环境变量前缀按定义层分：适配层 TORCH_KUCCL_*、库 KUCCL_*，
+             * 全大写（口径见 ENV_VARS.md）。此处曾因大小写与注入方不一致
+             * 静默失效过很久——新增变量务必三方核对（读取/注入/文档） */
+            const char *e = std::getenv("TORCH_KUCCL_FLUSH");
+            return e != nullptr && e[0] != '\0' && std::strcmp(e, "0") != 0;
+        }();
+        return v;
+    }
+
     mutable kucclRequest_t req_;
+    kucclComm_t comm_ = nullptr;      /* flush 用（构造期保存） */
     std::vector<at::Tensor> tensors_; /* tensor 保活（异步期间不释放） */
     std::function<void()> finisher_;  /* 完成时收尾（列表式拆回等） */
     mutable std::atomic<bool> done_;
@@ -199,8 +217,8 @@ public:
      * ★ devices 必须作为第 4 个参数传入（extended_api 之后）。
      *   若误传到第 3 个位置（extended_api 槽），truthy 列表会使 PyTorch
      *   按扩展 API 约定调用工厂 creator_fn(_DistributedBackendOptions, opts)，
-     *   与 createBackendKuccl(store, rank, world_size, timeout) 签名不符
-     *   → init_process_group 报 TypeError（PyTorch 2.9 实测坑）。
+     *   与 createBackendKuccl(store, rank, world_size, timeout) 签名不符，
+     *   init_process_group 将报 TypeError（PyTorch 2.9 行为）。
      *
      * devices=["cpu"] 的作用：
      *   1) 消除 "Device capability unspecified" 告警
@@ -245,4 +263,4 @@ private:
 
 } /* namespace c10d */
 
-#endif /* KUCCL_BACKEND_HPP_ */
+#endif /* KuCCL_BACKEND_HPP_ */

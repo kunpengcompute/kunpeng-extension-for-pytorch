@@ -1,5 +1,5 @@
 /*
- * KUCCL OOB 实现 —— 基于 c10d::TCPStore 的引导通信
+ * KuCCL OOB 实现 —— 基于 c10d::TCPStore 的引导通信
  *
  * 逻辑：
  *   - leader-then-broadcast allgather（rank-0 聚合后广播）
@@ -28,7 +28,7 @@ std::mutex g_log_mutex;
 
 bool oob_debug_enabled() {
     static const bool enabled = [] {
-        const char *v = std::getenv("KUCCL_OOB_DEBUG");
+        const char *v = std::getenv("TORCH_KUCCL_OOB_DEBUG");
         return v != nullptr && v[0] != '\0' && std::strcmp(v, "0") != 0;
     }();
     return enabled;
@@ -42,12 +42,13 @@ std::string get_hostname() {
     return std::string(buf);
 }
 
+/* 输出走 stderr：stdout 是 benchmark 的解析流，调试输出绝不污染它 */
 void log_oob(int rank, int ws, const std::string &prefix, const std::string &msg) {
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                   std::chrono::steady_clock::now().time_since_epoch())
                   .count();
     std::lock_guard<std::mutex> lock(g_log_mutex);
-    std::cout << "[KUCCL-OOB][t=" << ms << "ms][host=" << get_hostname()
+    std::cerr << "[KuCCL-OOB][t=" << ms << "ms][host=" << get_hostname()
               << "][pid=" << static_cast<int>(::getpid()) << "][rank=" << rank << "/" << ws
               << "][prefix=" << prefix << "] " << msg << std::endl;
 }

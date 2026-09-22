@@ -1,8 +1,8 @@
-#ifndef KUCCL_TYPES_HPP_
-#define KUCCL_TYPES_HPP_
+#ifndef KuCCL_TYPES_HPP_
+#define KuCCL_TYPES_HPP_
 
 /*
- * KUCCL 公共类型定义
+ * KuCCL 公共类型定义
  *
  * 本文件属于 kuccl 纯库，禁止依赖任何框架头文件
  * （不 include torch/mpi/pybind —— 那些属于 kuccl_backend 适配层）。
@@ -15,15 +15,15 @@
 #include <stdint.h>
 
 /* ════════════════════════════════════════════════════════════
- * 符号可见性宏（KUCCL_API）
+ * 符号可见性宏（KuCCL_API）
  *
  * 放在 types.hpp（所有 cpp 都会 include 它），保证库内各文件统一。
- * 编译库时 -DKUCCL_EXPORTS → 符号导出；用户 include 时宏为空。
+ * 编译库时 -DKuCCL_EXPORTS → 符号导出；用户 include 时宏为空。
  * ════════════════════════════════════════════════════════════*/
-#if defined(KUCCL_EXPORTS)
-#define KUCCL_API __attribute__((visibility("default")))
+#if defined(KuCCL_EXPORTS)
+#define KuCCL_API __attribute__((visibility("default")))
 #else
-#define KUCCL_API
+#define KuCCL_API
 #endif
 
 #ifdef __cplusplus
@@ -31,13 +31,17 @@ extern "C" {
 #endif
 
 /* ── 返回码 ────────────────────────────────────────────── */
-typedef enum { KUCCL_SUCCESS = 0, KUCCL_FAIL = -1 } kucclResult_t;
+/* 结果码：0 成功；-1 失败。
+ * 失败的具体原因走两条文本通道：
+ *   kucclGetLastError()（kuccl/UCG 两层的报错原文，含 UCG st 码）
+ *   KUCCL_LOG_* 日志行                                                  */
+typedef enum { KuCCL_SUCCESS = 0, KuCCL_FAIL = -1 } kucclResult_t;
 
 /* ── 通信域状态（kucclTest 返回）──────────────────────── */
 typedef enum {
-    KUCCL_STATUS_PENDING = 0,
-    KUCCL_STATUS_COMPLETE = 1,
-    KUCCL_STATUS_ERROR = -1
+    KuCCL_STATUS_PENDING = 0,
+    KuCCL_STATUS_COMPLETE = 1,
+    KuCCL_STATUS_ERROR = -1
 } kucclStatus_t;
 
 /* ── 全局唯一 ID ──────────────────────────────────────────
@@ -113,4 +117,4 @@ typedef struct kucclConfig {
 } /* extern "C" */
 #endif
 
-#endif /* KUCCL_TYPES_HPP_ */
+#endif /* KuCCL_TYPES_HPP_ */

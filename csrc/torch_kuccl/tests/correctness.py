@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-correctness.py —— KUCCL 正确性测试套件（多节点/多规模/多dtype/背靠背压力）
+correctness.py —— KuCCL 正确性测试套件（多节点/多规模/多dtype/背靠背压力）
 
 验证方式：解析式期望值（数据由 rank/ws 确定，期望结果可手算），
 不依赖 gloo 做参照——但可用 --backend gloo 反向验证测试逻辑本身。
@@ -51,9 +51,13 @@ import torch.distributed as dist
 _RESULTS = []  # (tag, ok)
 
 
-def check(tag, got, expected):
-    """整型精确比较；浮点 allclose（大数 FP32 求和有舍入）。"""
-    if got.dtype.is_floating_point:
+def check(tag, got, expected, exact=False):
+    """整型精确比较；浮点 allclose（大数 FP32 求和有舍入）。
+    exact=True 用于纯数据搬运类算子（allgather/broadcast）——
+    它们不做任何算术，1 ulp 的偏差也是错误，不能用容差掩盖。"""
+    if exact:
+        ok = torch.equal(got, expected)
+    elif got.dtype.is_floating_point:
         ok = torch.allclose(got, expected, rtol=1e-5, atol=1e-5)
     else:
         ok = torch.equal(got, expected)
@@ -97,7 +101,7 @@ def t_allgather(rank, ws):
                 for r in range(ws)])
             gather_list = [torch.zeros(n, dtype=dtype) for _ in range(ws)]
             dist.all_gather(gather_list, send)
-            check(f"allgather {dtype} {size_bytes}B", torch.cat(gather_list), expected)
+            check(f"allgather {dtype} {size_bytes}B", torch.cat(gather_list), expected, exact=True)
 
 
 def t_allgather_flat(rank, ws):
@@ -111,7 +115,7 @@ def t_allgather_flat(rank, ws):
             for r in range(ws)])
         recv = torch.zeros(ws * n, dtype=dtype)
         dist.all_gather_into_tensor(recv, send)
-        check(f"all_gather_into_tensor {dtype} n=7", recv, expected)
+        check(f"all_gather_into_tensor {dtype} n=7", recv, expected, exact=True)
     # 连续缓冲版扫规模（int32）
     elem = 4
     for size_bytes in SCAN_SIZES:
@@ -178,7 +182,10 @@ def t_alltoall(rank, ws):
     # src 发送缓冲的第 rank 块 = arange(rank*per, (rank+1)*per) + src*100000
     elem = 4  # int32
     for size_bytes in SCAN_SIZES:
-        per = max(1, size_bytes // elem // ws)
+        per = size_bytes // elem // ws
+        if per == 0:
+            continue  # local patch: 每对进程不足 1 元素，无法等分——跳过
+                  # （原实现 max(1,0)=1 使 8B~256B 各档坍缩成同一个 512B 用例，标签误导）
         log_case(f"alltoall 等长 int32 {size_bytes}B")
         send = torch.arange(ws * per, dtype=torch.int32) + rank * 100000
         expected = torch.cat([
@@ -248,10 +255,10 @@ def run_suite(backend, rank, ws, iters, timeout_s=300):
 
     n_pass = sum(1 for _, ok in _RESULTS if ok)
     n_all = len(_RESULTS)
+    for tag, ok in _RESULTS:
+        if not ok:
+            print(f"  ✗ [rank {rank}] {tag}", flush=True)
     if rank == 0:
-        for tag, ok in _RESULTS:
-            if not ok:
-                print(f"  ✗ {tag}", flush=True)
         print(f"  {n_pass}/{n_all} PASS", flush=True)
 
     # 全员一致判定：任一 rank 任一用例失败 → 全体 FAIL
@@ -290,7 +297,7 @@ def _pick_free_port(start_port, count, host):
 def _worker_main(args):
     rank = int(os.environ["RANK"])
     ws = int(os.environ["WORLD_SIZE"])
-    spawned = os.environ.get("KUCCL_TEST_SPAWNED") == "1"
+    spawned = os.environ.get("KuCCL_TEST_SPAWNED") == "1"
 
     if spawned:
         # spawn 模式：parent 已清洗过残留环境变量并选定可用端口，
@@ -327,7 +334,7 @@ def _worker_main(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="KUCCL 正确性测试套件")
+    parser = argparse.ArgumentParser(description="KuCCL 正确性测试套件")
     parser.add_argument("--backends", nargs="+", default=["kuccl"],
                         help="后端序列（默认 kuccl；可 'kuccl gloo' 测切换）")
     parser.add_argument("--world-size", type=int, default=2,
@@ -367,7 +374,7 @@ def main():
         env.update({"RANK": str(r), "WORLD_SIZE": str(args.world_size),
                     "MASTER_ADDR": args.master_addr,
                     "MASTER_PORT": str(base),
-                    "KUCCL_TEST_SPAWNED": "1"})
+                    "KuCCL_TEST_SPAWNED": "1"})
         p = ctx.Process(target=_spawn_entry, args=(env, vars(args)))
         procs.append(p)
         p.start()

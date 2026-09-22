@@ -2,7 +2,7 @@
 """
 test_allreduce_coalesced.py —— 多 tensor 合并归约测试
 
-验证 KUCCL 的 allreduce_coalesced 实现：
+验证 KuCCL 的 allreduce_coalesced 实现：
   把 N 个 tensor 拼成 1 个大 buffer，只做 1 轮通信。
 
 对比：

@@ -36,7 +36,7 @@
 #include <new>
 #include <vector>
 
-#if defined(KUCCL_HAVE_KUPL)
+#if defined(KuCCL_HAVE_KUPL)
 
 #include <kupl.h>
 
@@ -147,7 +147,7 @@ size_t align_page(size_t n) {
 kucclResult_t ensure_scratch(KuplComm *kc, size_t need_bytes) {
     const size_t half = align_page(need_bytes);
     if (kc->scratch != nullptr && kc->scratch_half >= half)
-        return KUCCL_SUCCESS;
+        return KuCCL_SUCCESS;
     if (kc->scratch != nullptr) {
         kupl_shm_win_free(kc->scratch);
         kc->scratch = nullptr;
@@ -159,12 +159,12 @@ kucclResult_t ensure_scratch(KuplComm *kc, size_t need_bytes) {
     if (kupl_shm_win_alloc(half * 2, kc->comm, &base, &win) != 0 || base == nullptr ||
         win == nullptr) {
         detail::err_record("kupl: staging win_alloc(%zu) FAILED", half * 2);
-        return KUCCL_FAIL;
+        return KuCCL_FAIL;
     }
     kc->scratch = win;
     kc->scratch_base = base;
     kc->scratch_half = half;
-    return KUCCL_SUCCESS;
+    return KuCCL_SUCCESS;
 }
 
 inline void *scratch_send(KuplComm *kc) {
@@ -182,7 +182,7 @@ inline void *scratch_recv(KuplComm *kc) {
 
 static kucclResult_t kupl_process_init(kucclComm * /*comm*/) {
     /* 无进程级前置：kupl_shm_init 由 comm_create / 各 init 惰性触发 */
-    return KUCCL_SUCCESS;
+    return KuCCL_SUCCESS;
 }
 
 static void kupl_process_finalize() {}
@@ -193,7 +193,7 @@ static kucclResult_t kupl_group_init(kucclComm *comm) {
     auto *kc = new (std::nothrow) KuplComm();
     if (kc == nullptr) {
         detail::err_record("kupl: alloc group ctx FAILED");
-        return KUCCL_FAIL;
+        return KuCCL_FAIL;
     }
     kc->owner = comm;
     comm->be_ctx = kc;
@@ -208,14 +208,14 @@ static kucclResult_t kupl_group_init(kucclComm *comm) {
                              &kc->comm) != 0 ||
         kc->comm == nullptr) {
         detail::err_record("kupl: kupl_shm_comm_create FAILED");
-        KUCCL_LOG_ERROR(rank, "kupl_shm_comm_create FAILED");
+        KuCCL_LOG_ERROR(rank, "kupl_shm_comm_create FAILED");
         delete kc;
         comm->be_ctx = nullptr;
-        return KUCCL_FAIL;
+        return KuCCL_FAIL;
     }
 
-    KUCCL_LOG_INFO(rank, "kupl shm comm created (nranks=%d)", comm->nranks);
-    return KUCCL_SUCCESS;
+    KuCCL_LOG_INFO(rank, "kupl shm comm created (nranks=%d)", comm->nranks);
+    return KuCCL_SUCCESS;
 }
 
 static void kupl_group_fini(kucclComm *comm) {
@@ -246,7 +246,7 @@ static kucclResult_t kupl_coll_start(kucclComm *comm, CollOp op, const CollParam
     auto *priv = new (std::nothrow) KuplReq();
     if (priv == nullptr) {
         detail::err_record("kupl: alloc request state FAILED");
-        return KUCCL_FAIL;
+        return KuCCL_FAIL;
     }
 
     kupl_shm_request_h kreq = nullptr;
@@ -256,10 +256,10 @@ static kucclResult_t kupl_coll_start(kucclComm *comm, CollOp op, const CollParam
     case CollOp::AllReduce: {
         const size_t bytes = p->count * dt_size;
         if (bytes == 0 || bytes > static_cast<size_t>(INT32_MAX) ||
-            ensure_scratch(kc, bytes) != KUCCL_SUCCESS) {
+            ensure_scratch(kc, bytes) != KuCCL_SUCCESS) {
             detail::err_record("kupl allreduce: staging FAILED");
             delete priv;
-            return KUCCL_FAIL;
+            return KuCCL_FAIL;
         }
         void *send_r = scratch_send(kc);
         void *recv_r = scratch_recv(kc);
@@ -269,13 +269,13 @@ static kucclResult_t kupl_coll_start(kucclComm *comm, CollOp op, const CollParam
                                     &kreq) != 0) {
             detail::err_record("kupl: allreduce_init FAILED");
             delete priv;
-            return KUCCL_FAIL;
+            return KuCCL_FAIL;
         }
         if (kupl_shm_request_start(kreq) != 0) {
             detail::err_record("kupl: allreduce start FAILED");
             kupl_shm_request_free(kreq);
             delete priv;
-            return KUCCL_FAIL;
+            return KuCCL_FAIL;
         }
         priv->user_dst = p->recvbuff;
         priv->win_src = recv_r;
@@ -285,10 +285,10 @@ static kucclResult_t kupl_coll_start(kucclComm *comm, CollOp op, const CollParam
     case CollOp::Broadcast: {
         const size_t bytes = p->count * dt_size;
         if (bytes == 0 || bytes > static_cast<size_t>(INT32_MAX) ||
-            ensure_scratch(kc, bytes) != KUCCL_SUCCESS) {
+            ensure_scratch(kc, bytes) != KuCCL_SUCCESS) {
             detail::err_record("kupl bcast: staging FAILED");
             delete priv;
-            return KUCCL_FAIL;
+            return KuCCL_FAIL;
         }
         void *buf_r = scratch_recv(kc);
         /* root 先拷入；bcast_init 内部对 buffer 所在窗口做 fence，
@@ -300,13 +300,13 @@ static kucclResult_t kupl_coll_start(kucclComm *comm, CollOp op, const CollParam
                                 p->root, kc->comm, &kreq) != 0) {
             detail::err_record("kupl: bcast_init FAILED");
             delete priv;
-            return KUCCL_FAIL;
+            return KuCCL_FAIL;
         }
         if (kupl_shm_request_start(kreq) != 0) {
             detail::err_record("kupl: bcast start FAILED");
             kupl_shm_request_free(kreq);
             delete priv;
-            return KUCCL_FAIL;
+            return KuCCL_FAIL;
         }
         priv->user_dst = p->recvbuff;
         priv->win_src = buf_r;
@@ -317,10 +317,10 @@ static kucclResult_t kupl_coll_start(kucclComm *comm, CollOp op, const CollParam
         const size_t per_rank = p->count * dt_size;
         const size_t total = per_rank * static_cast<size_t>(comm->nranks);
         if (per_rank == 0 || total > static_cast<size_t>(INT32_MAX) ||
-            ensure_scratch(kc, total) != KUCCL_SUCCESS) {
+            ensure_scratch(kc, total) != KuCCL_SUCCESS) {
             detail::err_record("kupl alltoall: staging FAILED");
             delete priv;
-            return KUCCL_FAIL;
+            return KuCCL_FAIL;
         }
         void *send_r = scratch_send(kc);
         void *recv_r = scratch_recv(kc);
@@ -330,13 +330,13 @@ static kucclResult_t kupl_coll_start(kucclComm *comm, CollOp op, const CollParam
                                    kc->comm, &kreq) != 0) {
             detail::err_record("kupl: alltoall_init FAILED");
             delete priv;
-            return KUCCL_FAIL;
+            return KuCCL_FAIL;
         }
         if (kupl_shm_request_start(kreq) != 0) {
             detail::err_record("kupl: alltoall start FAILED");
             kupl_shm_request_free(kreq);
             delete priv;
-            return KUCCL_FAIL;
+            return KuCCL_FAIL;
         }
         priv->user_dst = p->recvbuff;
         priv->win_src = recv_r;
@@ -350,10 +350,10 @@ static kucclResult_t kupl_coll_start(kucclComm *comm, CollOp op, const CollParam
         const size_t chunk = p->count * dt_size;
         const size_t total = chunk * static_cast<size_t>(comm->nranks);
         if (chunk == 0 || total > static_cast<size_t>(INT32_MAX) ||
-            ensure_scratch(kc, total) != KUCCL_SUCCESS) {
+            ensure_scratch(kc, total) != KuCCL_SUCCESS) {
             detail::err_record("kupl allgather: staging FAILED");
             delete priv;
-            return KUCCL_FAIL;
+            return KuCCL_FAIL;
         }
         void *send_r = scratch_send(kc);
         void *recv_r = scratch_recv(kc);
@@ -366,13 +366,13 @@ static kucclResult_t kupl_coll_start(kucclComm *comm, CollOp op, const CollParam
                                    &kreq) != 0) {
             detail::err_record("kupl: allgather(alltoall) init FAILED");
             delete priv;
-            return KUCCL_FAIL;
+            return KuCCL_FAIL;
         }
         if (kupl_shm_request_start(kreq) != 0) {
             detail::err_record("kupl: allgather start FAILED");
             kupl_shm_request_free(kreq);
             delete priv;
-            return KUCCL_FAIL;
+            return KuCCL_FAIL;
         }
         priv->user_dst = p->recvbuff;
         priv->win_src = recv_r;
@@ -382,12 +382,12 @@ static kucclResult_t kupl_coll_start(kucclComm *comm, CollOp op, const CollParam
     default:
         detail::err_record("kupl: unsupported coll op %d", static_cast<int>(op));
         delete priv;
-        return KUCCL_FAIL;
+        return KuCCL_FAIL;
     }
 
     priv->req = kreq;
     req->priv = priv;
-    return KUCCL_SUCCESS;
+    return KuCCL_SUCCESS;
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -398,8 +398,8 @@ static kucclResult_t kupl_req_test(kucclRequest *req, int *flag, kucclStatus_t *
     auto *priv = static_cast<KuplReq *>(req->priv);
     if (priv == nullptr) {
         *flag = 1;
-        *status = KUCCL_STATUS_ERROR;
-        return KUCCL_SUCCESS;
+        *status = KuCCL_STATUS_ERROR;
+        return KuCCL_SUCCESS;
     }
     if (priv->user_dst != nullptr && priv->copy_bytes > 0) {
         std::memcpy(priv->user_dst, priv->win_src, priv->copy_bytes);
@@ -410,8 +410,8 @@ static kucclResult_t kupl_req_test(kucclRequest *req, int *flag, kucclStatus_t *
     delete priv;
     req->priv = nullptr;
     *flag = 1;
-    *status = KUCCL_STATUS_COMPLETE;
-    return KUCCL_SUCCESS;
+    *status = KuCCL_STATUS_COMPLETE;
+    return KuCCL_SUCCESS;
 }
 
 static void kupl_req_cancel(kucclRequest *req) {
@@ -429,7 +429,7 @@ static void kupl_comm_purge(kucclComm * /*comm*/) {}
 
 static kucclResult_t kupl_flush(kucclComm * /*comm*/) {
     /* shm 数据面同步完成，无在飞操作 */
-    return KUCCL_SUCCESS;
+    return KuCCL_SUCCESS;
 }
 
 const Ops *kupl_ops() {
@@ -444,7 +444,7 @@ const Ops *kupl_ops() {
 } /* namespace backend */
 } /* namespace kuccl */
 
-#else /* !KUCCL_HAVE_KUPL —— 存根（未找到 KUPL 时的占位实现） */
+#else /* !KuCCL_HAVE_KUPL —— 存根（未找到 KUPL 时的占位实现） */
 
 namespace kuccl {
 namespace backend {
@@ -452,14 +452,14 @@ namespace backend {
 namespace {
 
 kucclResult_t kupl_unavailable(const char *what) {
-    detail::err_record("kupl backend: %s unavailable (built without KUCCL_HAVE_KUPL; "
+    detail::err_record("kupl backend: %s unavailable (built without KuCCL_HAVE_KUPL; "
                        "set KUPL_DIR to a KUPL install prefix and rebuild)",
                        what);
-    return KUCCL_FAIL;
+    return KuCCL_FAIL;
 }
 
 kucclResult_t kupl_process_init(kucclComm *comm) {
-    KUCCL_LOG_ERROR(comm->rank, "KUCCL_BACKEND_TYPE=kupl: 本构建未链接 KUPL"
+    KuCCL_LOG_ERROR(comm->rank, "KUCCL_BACKEND_TYPE=kupl: 本构建未链接 KUPL"
                                 "（需 KUPL_DIR 指向 kupl 安装前缀后重新编译），"
                                 "当前可用后端：xucg。");
     return kupl_unavailable("process_init");
@@ -503,4 +503,4 @@ const Ops *kupl_ops() {
 } /* namespace backend */
 } /* namespace kuccl */
 
-#endif /* KUCCL_HAVE_KUPL */
+#endif /* KuCCL_HAVE_KUPL */

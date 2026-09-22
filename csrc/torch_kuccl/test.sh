@@ -1,5 +1,5 @@
 #!/bin/bash
-# test.sh —— KUCCL 一键功能测试（单节点）
+# test.sh —— KuCCL 一键功能测试（单节点）
 #
 # 用法：
 #   ./test.sh              # 正确性套件（kuccl ws=2 + cpu:kuccl 规格语法 + gloo 反向验证）
@@ -11,7 +11,7 @@
 # 独有测试（本脚本不跑，按需手动）：
 #   python tests/test_subgroup.py             子组/重叠通信域
 #   python tests/test_allreduce_coalesced.py  多 tensor 合并归约
-#   python tests/test_init_timing.py          建组耗时打点（KUCCL_TIMING=1）
+#   python tests/test_init_timing.py          建组耗时打点（KuCCL_TIMING=1）
 #   python tests/test_spec_case1.py           设计书验收用例 1
 #   bash ../benchmarks/communication/bash.md  # DeepSpeed 套件见此速查
 #
@@ -22,7 +22,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # 没激活环境就自动 source
-if [[ "${CONDA_DEFAULT_ENV:-}" != "${KUCCL_CONDA_ENV:-kuccl291}" ]]; then
+if [[ "${CONDA_DEFAULT_ENV:-}" != "${KuCCL_CONDA_ENV:-kuccl291}" ]]; then
     echo "[env] 未激活环境，自动 source ./env.sh ..."
     # shellcheck disable=SC1091
     source "${SCRIPT_DIR}/env.sh"

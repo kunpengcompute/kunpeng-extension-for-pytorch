@@ -1,5 +1,5 @@
-#ifndef KUCCL_OOB_HPP_
-#define KUCCL_OOB_HPP_
+#ifndef KuCCL_OOB_HPP_
+#define KuCCL_OOB_HPP_
 
 /*
  * OOB（Out-of-Band）引导层
@@ -29,4 +29,4 @@ void store_barrier(c10d::Store *store, int rank, int world_size, const std::stri
 
 } // namespace kuccl
 
-#endif /* KUCCL_OOB_HPP_ */
+#endif /* KuCCL_OOB_HPP_ */

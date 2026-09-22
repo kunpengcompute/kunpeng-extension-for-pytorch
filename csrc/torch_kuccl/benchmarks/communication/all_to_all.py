@@ -70,8 +70,12 @@ def run_all_to_all(local_rank, args):
         # loop over various tensor sizes
         for M in M_LIST:
             global_rank = dist.get_rank()
+            if M % world_size != 0:
+                continue  # local patch: all_to_all 需均分，M < world_size 无意义（原版
+                          # 构造 ws×M 恒整除；改 per-rank 扫描后必须跳过，否则断言崩溃）
             try:
-                mat = torch.ones(world_size, M,
+                mat = torch.ones(M,   # local patch: per-rank message scan（原版 ws×M
+                              #   的构造在 CPU ws=128 下最小 1KB/最大 512MB 失控）
                                  dtype=getattr(torch, args.dtype)).to(get_accelerator().device_name(local_rank))
                 assert mat.numel() % world_size == 0, f"tensor cannot be divided in {world_size} chunks"
                 sync_all()

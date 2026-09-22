@@ -1,5 +1,5 @@
-﻿#ifndef KUCCL_COMM_IMPL_HPP_
-#define KUCCL_COMM_IMPL_HPP_
+﻿#ifndef KuCCL_COMM_IMPL_HPP_
+#define KuCCL_COMM_IMPL_HPP_
 
 /*
  * kuccl 通信域内部实体（libkuccl 私有，不安装、不对用户暴露）
@@ -40,7 +40,7 @@ extern "C" {
  * 后端无关的外壳：状态 + 看门狗起点 + 后端私有状态指针。
  * 后端在 priv 里管理自己的请求句柄（xucg: ucg_request_h 等）。 */
 struct kucclRequest {
-    kucclStatus_t status = KUCCL_STATUS_PENDING;
+    kucclStatus_t status = KuCCL_STATUS_PENDING;
     /* 启动时刻：看门狗计时与剖析共用 */
     std::chrono::steady_clock::time_point t0{};
     /* 算子名（看门狗超时信息用，指向静态字符串） */
@@ -87,6 +87,7 @@ extern std::recursive_mutex g_api_lock;
 
 /* 错误信息记录（定义在 error.cpp，TLS 存储）——失败路径调用 */
 void err_record(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+void err_clear(void); /* 清空本线程错误历史（成功路径调用，保证 last= 语义新鲜） */
 const char *err_peek_last();
 void err_append(const char *ctx);
 
@@ -103,4 +104,4 @@ const backend::Ops *active_backend();
 
 #endif /* __cplusplus */
 
-#endif /* KUCCL_COMM_IMPL_HPP_ */
+#endif /* KuCCL_COMM_IMPL_HPP_ */

@@ -79,7 +79,8 @@ def run_all_gather(local_rank, args):
         for M in M_LIST:
             global_rank = dist.get_rank()
             try:
-                mat = torch.ones(world_size, M,
+                mat = torch.ones(M,   # local patch: per-rank message scan（原版 ws×M
+                              #   的构造在 CPU ws=128 下最小 1KB/最大 512MB 失控）
                                  dtype=getattr(torch, args.dtype)).to(get_accelerator().device_name(local_rank))
                 sync_all()
                 input = ((mat.mul_(float(global_rank))).view(-1))

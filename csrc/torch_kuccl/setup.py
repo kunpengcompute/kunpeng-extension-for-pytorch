@@ -16,7 +16,7 @@ torch_kuccl — PyTorch c10d 适配层
   cd torch_kuccl
   python setup.py build_ext --inplace
 
-产物：kuccl_backend.so（import kuccl 即自动注册 "kuccl" backend）
+产物：kuccl/kuccl_backend.so（包内；import kuccl 即自动注册 "kuccl" backend）
 """
 
 import os
@@ -26,7 +26,7 @@ from setuptools import setup
 from torch.utils.cpp_extension import BuildExtension, CppExtension
 
 HERE      = Path(__file__).parent.resolve()
-LIBKUCCL  = (HERE.parent / "kuccl").resolve()        # 库本体（兄弟目录）
+LIBKuCCL  = (HERE.parent / "kuccl").resolve()        # 库本体（兄弟目录）
 HUCX_DIR = os.environ.get("HUCX_DIR")
 XUCG_DIR = os.environ.get("XUCG_DIR")
 
@@ -36,25 +36,25 @@ if not XUCG_DIR:
     raise SystemExit("请先 export XUCG_DIR=/path/to/xucg")
 
 ext_module = CppExtension(
-    name="kuccl_backend",
+    name="kuccl.kuccl_backend",
     sources=[
         "csrc/backend.cpp",
         "csrc/oob.cpp",                # Store 版 OOB 工具（适配层私有）
     ],
     include_dirs=[
         str(HERE / "include"),          # backend.hpp / oob.hpp（本包）
-        str(LIBKUCCL / "include"),      # kuccl.h / types.hpp（库公开头）
+        str(LIBKuCCL / "include"),      # kuccl.h / types.hpp（库公开头）
         os.path.join(HUCX_DIR, "include"),
         os.path.join(XUCG_DIR, "include"),
     ],
     library_dirs=[
-        str(LIBKUCCL / "build"),        # libkuccl.so 的位置
+        str(LIBKuCCL / "build"),        # libkuccl.so 的位置
         os.path.join(HUCX_DIR, "lib"),
         os.path.join(XUCG_DIR, "lib"),
         os.path.join(XUCG_DIR, "lib", "planc"),
     ],
     runtime_library_dirs=[
-        str(LIBKUCCL / "build"),
+        str(LIBKuCCL / "build"),
         os.path.join(HUCX_DIR, "lib"),
         os.path.join(XUCG_DIR, "lib"),
         os.path.join(XUCG_DIR, "lib", "planc"),
@@ -68,7 +68,7 @@ ext_module = CppExtension(
 setup(
     name="kuccl",
     version="2.6.0",
-    description="KUCCL PyTorch backend adapter (links libkuccl.so)",
+    description="KuCCL PyTorch backend adapter (links libkuccl.so)",
     packages=["kuccl"],
     package_dir={"kuccl": "kuccl"},
     ext_modules=[ext_module],
