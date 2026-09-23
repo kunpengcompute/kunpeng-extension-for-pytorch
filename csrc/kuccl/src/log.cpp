@@ -19,11 +19,11 @@ namespace detail {
 
 /* 相对时间锚点：库加载时刻（steady_clock 单调，不受改系统时间影响）。
  * 日志里的 [+Ns] 即自此刻起算——多节点各进程锚点独立，用于单进程内看阶段。 */
-static const std::chrono::steady_clock::time_point g_log_t0 =
-    std::chrono::steady_clock::now();
+static const std::chrono::steady_clock::time_point g_log_t0 = std::chrono::steady_clock::now();
 
 /* ── 级别解析：大小写不敏感；数字 0-4；DEBUG=TRACE 别名 ── */
-static LogLevel parse_level(const char *e) {
+static LogLevel parse_level(const char *e)
+{
     if (e == nullptr || e[0] == '\0')
         return LogLevel::WARN; /* 未设 = 默认 WARN */
     if (e[1] == '\0' && e[0] >= '0' && e[0] <= '4')
@@ -49,23 +49,27 @@ static LogLevel parse_level(const char *e) {
     return LogLevel::WARN;
 }
 
-LogLevel log_level() {
-    static const LogLevel lv = [] { return parse_level(std::getenv("KUCCL_LOG_LEVEL")); }();
+LogLevel log_level()
+{
+    static const LogLevel lv = [] {
+        return parse_level(std::getenv("KUCCL_LOG_LEVEL"));
+    }();
     return lv;
 }
 
-static const char *level_tag(LogLevel lv) {
+static const char *level_tag(LogLevel lv)
+{
     switch (lv) {
-    case LogLevel::ERROR:
-        return "ERROR";
-    case LogLevel::WARN:
-        return "WARN";
-    case LogLevel::INFO:
-        return "INFO";
-    case LogLevel::TRACE:
-        return "TRACE";
-    case LogLevel::OFF:
-        break;
+        case LogLevel::ERROR:
+            return "ERROR";
+        case LogLevel::WARN:
+            return "WARN";
+        case LogLevel::INFO:
+            return "INFO";
+        case LogLevel::TRACE:
+            return "TRACE";
+        case LogLevel::OFF:
+            break;
     }
     return "?";
 }
@@ -73,7 +77,8 @@ static const char *level_tag(LogLevel lv) {
 /* ── rank 过滤：KUCCL_LOG_RANKS="0,3-5,17"（逗号分隔，支持区间；未设 = 全放行）。
  * 大 world 排障用：把 INFO/TRACE 限制到少数 rank，避免 128 进程刷屏。
  * 过滤对所有级别生效（含 ERROR）——想看全量就不设它。 */
-static bool rank_allowed(int rank) {
+static bool rank_allowed(int rank)
+{
     struct Range {
         int lo, hi;
     };
@@ -113,11 +118,9 @@ static bool rank_allowed(int rank) {
                 ++bad;
         }
         if (v.empty())
-            std::fprintf(stderr,
-                         "[KuCCL][WARN] KUCCL_LOG_RANKS='%s' 无有效 rank，按不过滤处理\n", e);
+            std::fprintf(stderr, "[KuCCL][WARN] KUCCL_LOG_RANKS='%s' 无有效 rank，按不过滤处理\n", e);
         else if (bad > 0)
-            std::fprintf(stderr, "[KuCCL][WARN] KUCCL_LOG_RANKS='%s' 有 %d 个无效片段已跳过\n",
-                         e, bad);
+            std::fprintf(stderr, "[KuCCL][WARN] KUCCL_LOG_RANKS='%s' 有 %d 个无效片段已跳过\n", e, bad);
         return v;
     }();
     if (ranges.empty() || rank < 0)
@@ -129,7 +132,8 @@ static bool rank_allowed(int rank) {
 }
 
 /* ── host 名：进程内取一次，超长截断（多节点聚合日志时区分来源机器）── */
-static const char *log_host() {
+static const char *log_host()
+{
     static const char *cached = [] {
         static char buf[24];
         if (::gethostname(buf, sizeof(buf) - 1) != 0) {
@@ -143,7 +147,8 @@ static const char *log_host() {
 }
 
 /* ── 截断安全的追加拼装：返回追加后的已用长度 ── */
-static int append_line(char *buf, std::size_t cap, int off, const char *fmt, ...) {
+static int append_line(char *buf, std::size_t cap, int off, const char *fmt, ...)
+{
     if (off < 0 || static_cast<std::size_t>(off) + 1 >= cap)
         return off;
     va_list ap;
@@ -156,7 +161,8 @@ static int append_line(char *buf, std::size_t cap, int off, const char *fmt, ...
     return off + (n < room ? n : room);
 }
 
-void log_write(LogLevel lv, int rank, const char *file, int line, const char *fmt, ...) {
+void log_write(LogLevel lv, int rank, const char *file, int line, const char *fmt, ...)
+{
     if (!rank_allowed(rank))
         return;
 
@@ -170,14 +176,13 @@ void log_write(LogLevel lv, int rank, const char *file, int line, const char *fm
         localtime_r(&now.tv_sec, &tm_v);
         std::strftime(ts, sizeof(ts), "%H:%M:%S", &tm_v);
         std::snprintf(ts + 8, sizeof(ts) - 8, ".%03d", static_cast<int>(now.tv_nsec / 1000000));
-        elapsed_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - g_log_t0)
-                        .count();
+        elapsed_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - g_log_t0).count();
     }
 
     /* 整行单缓冲拼装后一次写出：多线程不交错（glibc 对 stderr 的单次写带锁） */
     char buf[1024];
-    int n = append_line(buf, sizeof(buf), 0, "[KuCCL][%s][%s][+%.1fs][%s][rank %d] ",
-                        level_tag(lv), ts, elapsed_s, log_host(), rank);
+    int n = append_line(buf, sizeof(buf), 0, "[KuCCL][%s][%s][+%.1fs][%s][rank %d] ", level_tag(lv), ts, elapsed_s,
+                        log_host(), rank);
 
     /* 正文（变参）直接 vsnprintf 到剩余空间 */
     va_list ap;

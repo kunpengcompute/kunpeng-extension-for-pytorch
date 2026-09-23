@@ -26,7 +26,8 @@ namespace {
 
 std::mutex g_log_mutex;
 
-bool oob_debug_enabled() {
+bool oob_debug_enabled()
+{
     static const bool enabled = [] {
         const char *v = std::getenv("TORCH_KUCCL_OOB_DEBUG");
         return v != nullptr && v[0] != '\0' && std::strcmp(v, "0") != 0;
@@ -34,7 +35,8 @@ bool oob_debug_enabled() {
     return enabled;
 }
 
-std::string get_hostname() {
+std::string get_hostname()
+{
     char buf[256];
     std::memset(buf, 0, sizeof(buf));
     if (::gethostname(buf, sizeof(buf) - 1) != 0)
@@ -43,20 +45,20 @@ std::string get_hostname() {
 }
 
 /* 输出走 stderr：stdout 是 benchmark 的解析流，调试输出绝不污染它 */
-void log_oob(int rank, int ws, const std::string &prefix, const std::string &msg) {
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                  std::chrono::steady_clock::now().time_since_epoch())
+void log_oob(int rank, int ws, const std::string &prefix, const std::string &msg)
+{
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch())
                   .count();
     std::lock_guard<std::mutex> lock(g_log_mutex);
-    std::cerr << "[KuCCL-OOB][t=" << ms << "ms][host=" << get_hostname()
-              << "][pid=" << static_cast<int>(::getpid()) << "][rank=" << rank << "/" << ws
-              << "][prefix=" << prefix << "] " << msg << std::endl;
+    std::cerr << "[KuCCL-OOB][t=" << ms << "ms][host=" << get_hostname() << "][pid=" << static_cast<int>(::getpid())
+              << "][rank=" << rank << "/" << ws << "][prefix=" << prefix << "] " << msg << std::endl;
 }
 
 } // anonymous namespace
 
-void oob_allgather(c10d::Store *store, const void *sendbuf, void *recvbuf, int rank, int world_size,
-                   std::size_t msglen, const std::string &prefix) {
+void oob_allgather(c10d::Store *store, const void *sendbuf, void *recvbuf, int rank, int world_size, std::size_t msglen,
+                   const std::string &prefix)
+{
     if (!store)
         throw std::invalid_argument("oob_allgather: store is null");
     if (!sendbuf || !recvbuf)
@@ -102,8 +104,7 @@ void oob_allgather(c10d::Store *store, const void *sendbuf, void *recvbuf, int r
         std::memcpy(recvbuf, packed.data(), result_size);
 
         if (debug) {
-            log_oob(rank, world_size, prefix,
-                    "COMPLETE_LEADER result_bytes=" + std::to_string(result_size));
+            log_oob(rank, world_size, prefix, "COMPLETE_LEADER result_bytes=" + std::to_string(result_size));
         }
         return;
     }
@@ -116,12 +117,12 @@ void oob_allgather(c10d::Store *store, const void *sendbuf, void *recvbuf, int r
     std::memcpy(recvbuf, result.data(), result_size);
 
     if (debug) {
-        log_oob(rank, world_size, prefix,
-                "COMPLETE_FOLLOWER result_bytes=" + std::to_string(result_size));
+        log_oob(rank, world_size, prefix, "COMPLETE_FOLLOWER result_bytes=" + std::to_string(result_size));
     }
 }
 
-void store_barrier(c10d::Store *store, int rank, int world_size, const std::string &tag) {
+void store_barrier(c10d::Store *store, int rank, int world_size, const std::string &tag)
+{
     if (!store)
         throw std::invalid_argument("store_barrier: store is null");
     if (world_size <= 0 || rank < 0 || rank >= world_size)

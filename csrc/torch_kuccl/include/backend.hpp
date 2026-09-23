@@ -43,35 +43,47 @@ namespace c10d {
 class WorkKuccl : public Work {
 public:
     /* 空操作构造（零元素/无请求场景）：立即完成 */
-    explicit WorkKuccl(OpType opType = OpType::ALLGATHER)
-        : Work(-1, opType), req_(nullptr), done_(true), failed_(false) {
+    explicit WorkKuccl(OpType opType = OpType::ALLGATHER) : Work(-1, opType), req_(nullptr), done_(true), failed_(false)
+    {
         future_ = c10::make_intrusive<c10::ivalue::Future>(c10::NoneType::get());
     }
 
     /* 异步构造：持有在飞请求 + 参与的 tensor（保活）+ comm（flush 用）
      * finisher：完成时需要执行的收尾（如 allgather 列表式的拆回拷贝） */
-    WorkKuccl(kucclRequest_t req, kucclComm_t comm, std::vector<at::Tensor> tensors,
-              OpType opType = OpType::ALLGATHER, std::function<void()> finisher = nullptr)
-        : Work(-1, opType), req_(req), comm_(comm), tensors_(std::move(tensors)),
-          finisher_(std::move(finisher)), done_(false), failed_(false) {
+    WorkKuccl(kucclRequest_t req, kucclComm_t comm, std::vector<at::Tensor> tensors, OpType opType = OpType::ALLGATHER,
+              std::function<void()> finisher = nullptr)
+        : Work(-1, opType),
+          req_(req),
+          comm_(comm),
+          tensors_(std::move(tensors)),
+          finisher_(std::move(finisher)),
+          done_(false),
+          failed_(false)
+    {
         future_ = c10::make_intrusive<c10::ivalue::Future>(c10::NoneType::get());
     }
 
-    ~WorkKuccl() override {
+    ~WorkKuccl() override
+    {
         /* 析构时若用户既没 wait 也没查询完成——兜底同步，
          * 防止请求泄漏（UCG worker 已销毁时 kucclTest 会失败，
          * 此时只能放弃——文档约束：销毁 ProcessGroup 前应等待所有 Work） */
         synchronize();
     }
 
-    bool isCompleted() override {
+    bool isCompleted() override
+    {
         poll_once();
         return done_.load(std::memory_order_acquire);
     }
 
-    bool isSuccess() const override { return !failed_.load(std::memory_order_acquire); }
+    bool isSuccess() const override
+    {
+        return !failed_.load(std::memory_order_acquire);
+    }
 
-    bool wait(std::chrono::milliseconds timeout = kUnsetTimeout) override {
+    bool wait(std::chrono::milliseconds timeout = kUnsetTimeout) override
+    {
         /* 无超时：自旋推进直到完成（g_api_lock 保证多线程查询安全）。
          * 有超时：到点返回当前状态（不视为失败——用户可再 wait）。 */
         if (timeout == kUnsetTimeout) {
@@ -89,7 +101,8 @@ public:
         return isSuccess();
     }
 
-    void synchronize() override {
+    void synchronize() override
+    {
         while (!done_.load(std::memory_order_acquire)) {
             poll_once();
         }
@@ -97,7 +110,8 @@ public:
 
     void blockCurrentStream() override {}
 
-    c10::intrusive_ptr<c10::ivalue::Future> getFuture() override {
+    c10::intrusive_ptr<c10::ivalue::Future> getFuture() override
+    {
         /* Future 语义：首次查询时若已完成则标记完成 */
         poll_once();
         if (done_.load(std::memory_order_acquire) && !future_marked_) {
@@ -109,7 +123,8 @@ public:
 
 private:
     /* 推进一拍：查询请求状态；完成时收割、执行 finisher、标记 */
-    void poll_once() const {
+    void poll_once() const
+    {
         if (done_.load(std::memory_order_acquire))
             return;
         int flag = 0;
@@ -143,7 +158,8 @@ private:
         }
     }
 
-    static bool flush_enabled() {
+    static bool flush_enabled()
+    {
         static const bool v = [] {
             /* 环境变量前缀按定义层分：适配层 TORCH_KUCCL_*、库 KUCCL_*，
              * 全大写（口径见 ENV_VARS.md）。此处曾因大小写与注入方不一致
@@ -170,32 +186,30 @@ using WorkKucclPtr = c10::intrusive_ptr<WorkKuccl>;
 /* ── BackendKuccl（c10d::Backend 实现）─────────────────── */
 class BackendKuccl : public Backend {
 public:
-    BackendKuccl(c10::intrusive_ptr<Store> store, int rank, int world_size,
-                 std::chrono::milliseconds timeout);
+    BackendKuccl(c10::intrusive_ptr<Store> store, int rank, int world_size, std::chrono::milliseconds timeout);
     ~BackendKuccl() override;
 
-    const std::string getBackendName() const override { return "kuccl"; }
+    const std::string getBackendName() const override
+    {
+        return "kuccl";
+    }
 
     c10::intrusive_ptr<Work> allgather(std::vector<std::vector<at::Tensor>> &outputTensors,
-                                       std::vector<at::Tensor> &inputTensors,
-                                       const AllgatherOptions &opts) override;
+                                       std::vector<at::Tensor> &inputTensors, const AllgatherOptions &opts) override;
 
     c10::intrusive_ptr<Work> _allgather_base(at::Tensor &outputBuffer, at::Tensor &inputBuffer,
                                              const AllgatherOptions &opts) override;
 
-    c10::intrusive_ptr<Work> broadcast(std::vector<at::Tensor> &tensors,
-                                       const BroadcastOptions &opts) override;
+    c10::intrusive_ptr<Work> broadcast(std::vector<at::Tensor> &tensors, const BroadcastOptions &opts) override;
 
-    c10::intrusive_ptr<Work> allreduce(std::vector<at::Tensor> &tensors,
-                                       const AllreduceOptions &opts) override;
+    c10::intrusive_ptr<Work> allreduce(std::vector<at::Tensor> &tensors, const AllreduceOptions &opts) override;
 
     c10::intrusive_ptr<Work> allreduce_coalesced(std::vector<at::Tensor> &tensors,
                                                  const AllreduceCoalescedOptions &opts) override;
 
     c10::intrusive_ptr<Work> alltoall_base(at::Tensor &outputBuffer, at::Tensor &inputBuffer,
                                            std::vector<int64_t> &outputSplitSizes,
-                                           std::vector<int64_t> &inputSplitSizes,
-                                           const AllToAllOptions &opts) override;
+                                           std::vector<int64_t> &inputSplitSizes, const AllToAllOptions &opts) override;
 
     c10::intrusive_ptr<Work> send(std::vector<at::Tensor> &tensors, int dstRank, int tag) override;
 
@@ -207,9 +221,8 @@ public:
      * —— 标记 comm aborted，后续算子立即失败而非卡死/未定义 */
     void shutdown() override;
 
-    static c10::intrusive_ptr<Backend>
-    createBackendKuccl(const c10::intrusive_ptr<Store> &store, int rank, int size,
-                       const std::chrono::duration<float> &timeout);
+    static c10::intrusive_ptr<Backend> createBackendKuccl(const c10::intrusive_ptr<Store> &store, int rank, int size,
+                                                          const std::chrono::duration<float> &timeout);
 
     /* auto-register：import kuccl 即自动注册
      *
@@ -224,7 +237,8 @@ public:
      *   1) 消除 "Device capability unspecified" 告警
      *   2) 避免 cuda 张量被误路由到 kuccl
      *   3) 支持 "cpu:kuccl" 设备前缀写法 */
-    static void autoRegister() __attribute__((constructor)) {
+    static void autoRegister() __attribute__((constructor))
+    {
         py::object module = py::module::import("torch.distributed");
         py::object register_backend = module.attr("Backend").attr("register_backend");
         py::list devices;

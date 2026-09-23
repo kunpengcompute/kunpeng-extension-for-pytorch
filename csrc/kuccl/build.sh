@@ -12,19 +12,17 @@
 #
 # 门禁：符号表与 kuccl.map 逐个核对（12 公开接口，version script 双保险）
 #
-# 环境依赖：自动 source ./env.sh（HUCX/XUCG/BISHENG 路径；可选启用 KUPL_DIR）
+# 环境依赖：自动 source ./kuccl_env.sh（HUCX/XUCG/BISHENG 库路径）。
+# 纯库构建零 torch/conda 依赖——PyTorch 环境由仓库根 env.sh 管，与本构建无关。
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODE="${1:-lib}"
 
-# ── 自动激活环境（幂等）──────────────────────────────────────
-if [[ "${CONDA_DEFAULT_ENV:-}" != "${KUCCL_CONDA_ENV:-kuccl291}" ]]; then
-    echo "[env] 未激活环境，自动 source ./env.sh ..."
-    # shellcheck disable=SC1091
-    source "${SCRIPT_DIR}/env.sh"
-fi
+# ── 自动激活库路径环境（幂等，不含 conda）────────────────────
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/kuccl_env.sh"
 
 # clean 模式：清构建目录后走完整构建
 if [[ "${MODE}" == "clean" ]]; then
@@ -34,7 +32,7 @@ if [[ "${MODE}" == "clean" ]]; then
 fi
 
 echo "══════════════════════════════════════════════"
-echo " conda env : ${CONDA_DEFAULT_ENV:-<未激活>}"
+echo " conda env : ${CONDA_DEFAULT_ENV:-<纯库构建不需要>}"
 echo " HUCX_DIR  = ${HUCX_DIR}"
 echo " XUCG_DIR  = ${XUCG_DIR}"
 echo " BISHENG   = ${BISHENG_PATH}"
@@ -77,7 +75,7 @@ build_lib() {
         exit 1
     fi
     # 逐个核对 map 清单。
-    # ★ version script 生效后符号带版本后缀（kucclAllGather@@KUCCL_1.1），
+    # ★ version script 生效后符号带版本后缀（kucclAllGather@@KuCCL_1.1），
     #   匹配模式：符号名后跟 '@'（版本）或行尾——锚定行尾会漏配带版本符号
     miss=""
     while read -r sym; do
@@ -85,10 +83,17 @@ build_lib() {
         echo "$exported" | grep -qE " ${sym}(@|$)" || miss="$miss $sym"
     done < <(grep -E '^\s+kuccl' "$MAP" | tr -d ' ;')
     if [[ -n "$miss" ]]; then
-        echo "[门禁失败] map 清单中缺失符号（对应实现漏 KUCCL_API 或未编译）:$miss"
+        echo "[门禁失败] map 清单中缺失符号（对应实现漏 KuCCL_API 或未编译）:$miss"
         exit 1
     fi
     echo "[门禁 通过] 12 个公开接口全部导出且与 kuccl.map 一致"
+
+    # 版本戳：源码 HEAD + 构建时间。benchmark 启动时与当前 git HEAD 比对，
+    # 不一致即告警——防"pull 了新代码但跑的是旧 .so"的静默事故
+    {
+        git -C "${SCRIPT_DIR}" rev-parse --short HEAD 2>/dev/null || echo "unknown"
+        date '+%F %T'
+    } > "${SCRIPT_DIR}/build/BUILD_INFO"
 }
 
 case "${MODE}" in

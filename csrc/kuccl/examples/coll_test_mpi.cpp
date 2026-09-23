@@ -26,27 +26,26 @@
 /* ── OOB 回调桥接：kuccl 回调签名 → MPI_Allgather ─────────────
  * 回调签名（types.hpp）：int(const void* send, void* recv, int count, void* ctx)
  * 语义对齐 MPI_Allgather：每 rank 贡献 count 字节，收齐后按 rank 拼接 */
-static int mpi_oob_allgather(const void* sendbuf, void* recvbuf,
-                             int count, void* ctx) {
-    MPI_Comm comm = *static_cast<MPI_Comm*>(ctx);
-    int rc = MPI_Allgather(sendbuf, count, MPI_BYTE,
-                           recvbuf, count, MPI_BYTE, comm);
+static int mpi_oob_allgather(const void *sendbuf, void *recvbuf, int count, void *ctx)
+{
+    MPI_Comm comm = *static_cast<MPI_Comm *>(ctx);
+    int rc = MPI_Allgather(sendbuf, count, MPI_BYTE, recvbuf, count, MPI_BYTE, comm);
     return (rc == MPI_SUCCESS) ? 0 : -1;
 }
 
 /* ── kucclTest 轮询直至完成（请求推进发生在 kucclTest 内部）── */
-static int wait_request(kucclRequest_t* req, int rank) {
+static int wait_request(kucclRequest_t *req, int rank)
+{
     int flag = 0;
-    kucclStatus_t st = KUCCL_STATUS_PENDING;
+    kucclStatus_t st = KuCCL_STATUS_PENDING;
     while (!flag) {
-        if (kucclTest(req, &flag, &st) != KUCCL_SUCCESS) {
+        if (kucclTest(req, &flag, &st) != KuCCL_SUCCESS) {
             std::fprintf(stderr, "[Rank %d] kucclTest FAILED\n", rank);
             return -1;
         }
     }
-    if (st != KUCCL_STATUS_COMPLETE) {
-        std::fprintf(stderr, "[Rank %d] collective FAILED (status=%d)\n",
-                     rank, static_cast<int>(st));
+    if (st != KuCCL_STATUS_COMPLETE) {
+        std::fprintf(stderr, "[Rank %d] collective FAILED (status=%d)\n", rank, static_cast<int>(st));
         return -1;
     }
     return 0;
@@ -54,13 +53,16 @@ static int wait_request(kucclRequest_t* req, int rank) {
 
 static int g_failures = 0;
 
-static void report(int rank, const char* op, int ok) {
+static void report(int rank, const char *op, int ok)
+{
     std::printf("[Rank %d] %-12s %s\n", rank, op, ok ? "PASS" : "FAIL");
     std::fflush(stdout);
-    if (!ok) ++g_failures;
+    if (!ok)
+        ++g_failures;
 }
 
-int main(int argc, char** argv) {
+int main(int argc, char **argv)
+{
     const int want_split = (argc > 1 && std::strcmp(argv[1], "--test-split") == 0);
 
     /* ========== 1. MPI 初始化 ========== */
@@ -74,7 +76,7 @@ int main(int argc, char** argv) {
     kucclUniqueId kuccl_id;
     std::memset(&kuccl_id, 0, sizeof(kuccl_id));
     if (rank == 0) {
-        if (kucclGetUniqueId(&kuccl_id) != KUCCL_SUCCESS) {
+        if (kucclGetUniqueId(&kuccl_id) != KuCCL_SUCCESS) {
             std::fprintf(stderr, "[Rank 0] kucclGetUniqueId FAILED\n");
             MPI_Abort(MPI_COMM_WORLD, 1);
         }
@@ -82,16 +84,15 @@ int main(int argc, char** argv) {
     MPI_Bcast(&kuccl_id, sizeof(kuccl_id), MPI_BYTE, 0, MPI_COMM_WORLD);
 
     /* ========== 3. 创建 kuccl 通信域（集合操作，全员同时调用）========== */
-    MPI_Comm oob_comm = MPI_COMM_WORLD;   /* oob_ctx 指向它，回调里解引用 */
+    MPI_Comm oob_comm = MPI_COMM_WORLD; /* oob_ctx 指向它，回调里解引用 */
     kucclConfig_t config;
     std::memset(&config, 0, sizeof(config));
     config.oob_allgather = mpi_oob_allgather;
-    config.oob_bcast     = nullptr;       /* 选填：库内广播走 allgather 语义 */
-    config.oob_ctx       = &oob_comm;
+    config.oob_bcast = nullptr; /* 选填：库内广播走 allgather 语义 */
+    config.oob_ctx = &oob_comm;
 
     kucclComm_t comm = nullptr;
-    if (kucclCommInitRankConfig(&comm, world, kuccl_id, rank, &config)
-            != KUCCL_SUCCESS) {
+    if (kucclCommInitRankConfig(&comm, world, kuccl_id, rank, &config) != KuCCL_SUCCESS) {
         std::fprintf(stderr, "[Rank %d] kucclCommInitRankConfig FAILED\n", rank);
         MPI_Abort(MPI_COMM_WORLD, 1);
     }
@@ -100,21 +101,23 @@ int main(int argc, char** argv) {
 
     /* ========== 4. AllReduce：send[i]=rank，期望 sum=world*(world-1)/2 ========== */
     {
-        float* send = static_cast<float*>(std::malloc(ELEM_COUNT * sizeof(float)));
-        float* recv = static_cast<float*>(std::malloc(ELEM_COUNT * sizeof(float)));
-        for (int i = 0; i < ELEM_COUNT; ++i) send[i] = static_cast<float>(rank);
+        float *send = static_cast<float *>(std::malloc(ELEM_COUNT * sizeof(float)));
+        float *recv = static_cast<float *>(std::malloc(ELEM_COUNT * sizeof(float)));
+        for (int i = 0; i < ELEM_COUNT; ++i)
+            send[i] = static_cast<float>(rank);
 
         kucclRequest_t req = nullptr;
         int ok = 0;
-        if (kucclAllReduce(send, recv, ELEM_COUNT, kucclFloat, kucclSum,
-                           comm, &req) == KUCCL_SUCCESS &&
+        if (kucclAllReduce(send, recv, ELEM_COUNT, kucclFloat, kucclSum, comm, &req) == KuCCL_SUCCESS &&
             wait_request(&req, rank) == 0) {
             const float expected = static_cast<float>(world * (world - 1) / 2);
             ok = 1;
             for (int i = 0; i < ELEM_COUNT; ++i)
-                if (recv[i] != expected) { ok = 0; break; }
-            std::printf("[Rank %d] AllReduce 首元素=%.1f 预期=%.1f\n",
-                        rank, recv[0], expected);
+                if (recv[i] != expected) {
+                    ok = 0;
+                    break;
+                }
+            std::printf("[Rank %d] AllReduce 首元素=%.1f 预期=%.1f\n", rank, recv[0], expected);
         }
         report(rank, "AllReduce", ok);
         std::free(send);
@@ -122,24 +125,28 @@ int main(int argc, char** argv) {
     }
 
     /* ========== 5. Broadcast：root 填 42，期望全员 42 ==========
-     * 库语义：sendbuff 仅 root 有效（root 内部先拷到 recvbuff），
-     * 非 root 传 recvbuff 占位即可 */
+     * 库语义（与 torch 适配层一致）：bcast 以 recvbuff 为唯一数据缓冲——
+     * root 的数据必须已在 recvbuff 里（适配层靠 send/recv 同址实现原地）。
+     * 本例 send/recv 分离：root 先把 send 拷入 recv，非 root 的 send 不参与 */
     {
         const int root = 0;
-        int32_t* recv = static_cast<int32_t*>(
-            std::malloc(ELEM_COUNT * sizeof(int32_t)));
-        int32_t* send = static_cast<int32_t*>(
-            std::malloc(ELEM_COUNT * sizeof(int32_t)));
-        for (int i = 0; i < ELEM_COUNT; ++i) send[i] = 42;
+        int32_t *recv = static_cast<int32_t *>(std::malloc(ELEM_COUNT * sizeof(int32_t)));
+        int32_t *send = static_cast<int32_t *>(std::malloc(ELEM_COUNT * sizeof(int32_t)));
+        for (int i = 0; i < ELEM_COUNT; ++i)
+            send[i] = 42;
+        if (rank == root)
+            std::memcpy(recv, send, ELEM_COUNT * sizeof(int32_t));
 
         kucclRequest_t req = nullptr;
         int ok = 0;
-        if (kucclBroadcast(send, recv, ELEM_COUNT, kucclInt32, root,
-                           comm, &req) == KUCCL_SUCCESS &&
+        if (kucclBroadcast(send, recv, ELEM_COUNT, kucclInt32, root, comm, &req) == KuCCL_SUCCESS &&
             wait_request(&req, rank) == 0) {
             ok = 1;
             for (int i = 0; i < ELEM_COUNT; ++i)
-                if (recv[i] != 42) { ok = 0; break; }
+                if (recv[i] != 42) {
+                    ok = 0;
+                    break;
+                }
         }
         report(rank, "Broadcast", ok);
         std::free(send);
@@ -148,21 +155,22 @@ int main(int argc, char** argv) {
 
     /* ========== 6. AllGather：rank r 贡献 [r,r,...]，期望 recv=[0..ws-1] ========== */
     {
-        int32_t* send = static_cast<int32_t*>(
-            std::malloc(ELEM_COUNT * sizeof(int32_t)));
-        int32_t* recv = static_cast<int32_t*>(
-            std::malloc(static_cast<size_t>(world) * ELEM_COUNT * sizeof(int32_t)));
-        for (int i = 0; i < ELEM_COUNT; ++i) send[i] = rank;
+        int32_t *send = static_cast<int32_t *>(std::malloc(ELEM_COUNT * sizeof(int32_t)));
+        int32_t *recv = static_cast<int32_t *>(std::malloc(static_cast<size_t>(world) * ELEM_COUNT * sizeof(int32_t)));
+        for (int i = 0; i < ELEM_COUNT; ++i)
+            send[i] = rank;
 
         kucclRequest_t req = nullptr;
         int ok = 0;
-        if (kucclAllGather(send, recv, ELEM_COUNT, kucclInt32,
-                           comm, &req) == KUCCL_SUCCESS &&
+        if (kucclAllGather(send, recv, ELEM_COUNT, kucclInt32, comm, &req) == KuCCL_SUCCESS &&
             wait_request(&req, rank) == 0) {
             ok = 1;
             for (int j = 0; j < world && ok; ++j)
                 for (int i = 0; i < ELEM_COUNT; ++i)
-                    if (recv[j * ELEM_COUNT + i] != j) { ok = 0; break; }
+                    if (recv[j * ELEM_COUNT + i] != j) {
+                        ok = 0;
+                        break;
+                    }
         }
         report(rank, "AllGather", ok);
         std::free(send);
@@ -173,21 +181,23 @@ int main(int argc, char** argv) {
     {
         const int per_peer = 2;
         const int total = world * per_peer;
-        int32_t* send = static_cast<int32_t*>(std::malloc(total * sizeof(int32_t)));
-        int32_t* recv = static_cast<int32_t*>(std::malloc(total * sizeof(int32_t)));
+        int32_t *send = static_cast<int32_t *>(std::malloc(total * sizeof(int32_t)));
+        int32_t *recv = static_cast<int32_t *>(std::malloc(total * sizeof(int32_t)));
         for (int j = 0; j < world; ++j)
             for (int i = 0; i < per_peer; ++i)
                 send[j * per_peer + i] = rank * 100 + j;
 
         kucclRequest_t req = nullptr;
         int ok = 0;
-        if (kucclAllToAll(send, recv, per_peer, kucclInt32,
-                          comm, &req) == KUCCL_SUCCESS &&
+        if (kucclAllToAll(send, recv, per_peer, kucclInt32, comm, &req) == KuCCL_SUCCESS &&
             wait_request(&req, rank) == 0) {
             ok = 1;
             for (int j = 0; j < world && ok; ++j)
                 for (int i = 0; i < per_peer; ++i)
-                    if (recv[j * per_peer + i] != j * 100 + rank) { ok = 0; break; }
+                    if (recv[j * per_peer + i] != j * 100 + rank) {
+                        ok = 0;
+                        break;
+                    }
         }
         report(rank, "AllToAll", ok);
         std::free(send);
@@ -203,22 +213,19 @@ int main(int argc, char** argv) {
         kucclComm_t sub = nullptr;
         const int color = rank % 2;
         int ok = 0;
-        if (kucclCommSplit(comm, color, rank, &sub, nullptr) == KUCCL_SUCCESS) {
+        if (kucclCommSplit(comm, color, rank, &sub, nullptr) == KuCCL_SUCCESS) {
             const int new_rank = rank / 2;
             const int m = (color == 0) ? (world + 1) / 2 : world / 2;
-            float* send = static_cast<float*>(std::malloc(sizeof(float)));
-            float* recv = static_cast<float*>(std::malloc(sizeof(float)));
+            float *send = static_cast<float *>(std::malloc(sizeof(float)));
+            float *recv = static_cast<float *>(std::malloc(sizeof(float)));
             send[0] = static_cast<float>(new_rank);
 
             kucclRequest_t req = nullptr;
-            if (kucclAllReduce(send, recv, 1, kucclFloat, kucclSum,
-                               sub, &req) == KUCCL_SUCCESS &&
+            if (kucclAllReduce(send, recv, 1, kucclFloat, kucclSum, sub, &req) == KuCCL_SUCCESS &&
                 wait_request(&req, rank) == 0) {
-                const float expected =
-                    static_cast<float>(m * (m - 1) / 2);
+                const float expected = static_cast<float>(m * (m - 1) / 2);
                 ok = (recv[0] == expected);
-                std::printf("[Rank %d] Split(color=%d) sub-allreduce=%.1f 预期=%.1f\n",
-                            rank, color, recv[0], expected);
+                std::printf("[Rank %d] Split(color=%d) sub-allreduce=%.1f 预期=%.1f\n", rank, color, recv[0], expected);
             }
             std::free(send);
             std::free(recv);
@@ -235,8 +242,8 @@ int main(int argc, char** argv) {
     const int final_fail = g_failures;
     MPI_Reduce(&final_fail, &g_failures, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
     if (rank == 0)
-        std::printf("=== MPI 直调用例 %s（失败项=%d）===\n",
-                    g_failures == 0 ? "ALL PASSED" : "SOME FAILED", g_failures);
+        std::printf("=== MPI 直调用例 %s（失败项=%d）===\n", g_failures == 0 ? "ALL PASSED" : "SOME FAILED",
+                    g_failures);
 
     MPI_Finalize();
     return (g_failures == 0) ? 0 : 1;

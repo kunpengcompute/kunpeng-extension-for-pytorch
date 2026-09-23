@@ -63,7 +63,7 @@ struct XucgGlobal {
      * 的唯一拓扑入口；num_local_procs 仅作 UCX estimated_num_ppn 提示） */
     std::vector<uint64_t> host_hash;
     std::vector<int32_t> node_id;
-    int32_t nnode = 0; /* 节点数（topology_ok 时有效；诊断用） */
+    int32_t nnode = 0;              /* 节点数（topology_ok 时有效；诊断用） */
     std::vector<int32_t> socket_id; /* NUMA 节点号（socket_ok 时有效，稠密化） */
     int32_t nsocket = 0;
     bool socket_ok = false; /* NUMA 全组一致有效（任一 rank 探测失败则全组不喂） */
@@ -79,7 +79,6 @@ XucgGlobal g_xucg;
 std::atomic<int> g_topo_queries{0};
 std::atomic<int> g_topo_reported{0};
 
-
 /* 后端私有通信域状态（挂在 kucclComm::be_ctx）。
  * 生命周期：process_init 分配（ucg_init 的 oob_group cookie 需要），
  * group_init 填充组信息，group_fini 释放。 */
@@ -92,7 +91,8 @@ struct XucgComm {
 };
 
 /* 确保 comm 挂有后端私有状态（幂等；失败返回 nullptr 并记错误） */
-XucgComm *xucg_ensure_ctx(kucclComm *comm) {
+XucgComm *xucg_ensure_ctx(kucclComm *comm)
+{
     if (comm->be_ctx != nullptr)
         return static_cast<XucgComm *>(comm->be_ctx);
     auto *xctx = new (std::nothrow) XucgComm();
@@ -134,7 +134,8 @@ struct XucgBootstrapRecord {
 static_assert(sizeof(XucgBootstrapRecord) == 24, "unexpected layout");
 
 /* SplitMix64 — instance_token 生成 */
-uint64_t xucg_mix64(uint64_t x) {
+uint64_t xucg_mix64(uint64_t x)
+{
     x += 0x9e3779b97f4a7c15ULL;
     x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
     x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
@@ -143,7 +144,8 @@ uint64_t xucg_mix64(uint64_t x) {
 }
 
 /* FNV-1a feed helpers — group_id 哈希 */
-void xucg_fnv1a_feed_u32(uint32_t *hash, uint32_t value) {
+void xucg_fnv1a_feed_u32(uint32_t *hash, uint32_t value)
+{
     for (int b = 0; b < 4; ++b) {
         *hash ^= static_cast<uint8_t>(value & 0xffu);
         *hash *= 16777619u;
@@ -151,7 +153,8 @@ void xucg_fnv1a_feed_u32(uint32_t *hash, uint32_t value) {
     }
 }
 
-void xucg_fnv1a_feed_u64(uint32_t *hash, uint64_t value) {
+void xucg_fnv1a_feed_u64(uint32_t *hash, uint64_t value)
+{
     for (int b = 0; b < 8; ++b) {
         *hash ^= static_cast<uint8_t>(value & 0xffu);
         *hash *= 16777619u;
@@ -160,7 +163,8 @@ void xucg_fnv1a_feed_u64(uint32_t *hash, uint64_t value) {
 }
 
 /* 主机名 FNV-1a 哈希：同节点进程得到相同值（进程拓扑分组的依据） */
-uint64_t xucg_host_hash() {
+uint64_t xucg_host_hash()
+{
     char host[256] = {0};
     if (::gethostname(host, sizeof(host) - 1) != 0)
         return 0;
@@ -174,7 +178,8 @@ uint64_t xucg_host_hash() {
 
 /* NUMA 节点探测：调用线程亲和性 CPU 集合 ∩ 各 NUMA 节点 cpulist，
  * 取交集最大的节点号；探测失败返回 -1（调用方据此全组一致降级） */
-int32_t xucg_detect_numa() {
+int32_t xucg_detect_numa()
+{
     cpu_set_t set;
     if (sched_getaffinity(0, sizeof(set), &set) != 0)
         return -1;
@@ -198,8 +203,7 @@ int32_t xucg_detect_numa() {
         if (got == nullptr)
             continue;
         int cnt = 0;
-        for (char *tok = std::strtok(buf, ","); tok != nullptr;
-             tok = std::strtok(nullptr, ",")) {
+        for (char *tok = std::strtok(buf, ","); tok != nullptr; tok = std::strtok(nullptr, ",")) {
             int lo = -1, hi = -1;
             if (std::sscanf(tok, "%d-%d", &lo, &hi) == 2) {
                 if (lo > hi)
@@ -225,7 +229,8 @@ int32_t xucg_detect_numa() {
 /* 进程拓扑喂入开关（KUCCL_TOPOLOGY，默认 on）：
  * on  = 主机名哈希 OOB 交换喂 node_id（UCG 节点感知算法的输入）
  * off = 平铺模型（KUCCL_TOPOLOGY=0，A/B 对照 / 回退用） */
-static bool topology_enabled() {
+static bool topology_enabled()
+{
     static const bool v = [] {
         const char *e = std::getenv("KUCCL_TOPOLOGY");
         return e == nullptr || e[0] == '\0' || std::strcmp(e, "0") != 0;
@@ -237,17 +242,18 @@ static bool topology_enabled() {
  * UCG 回调
  * ════════════════════════════════════════════════════════════*/
 
-ucg_status_t xucg_ucg_oob_cb(const void *sendbuf, void *recvbuf, int32_t count, void *group) {
+ucg_status_t xucg_ucg_oob_cb(const void *sendbuf, void *recvbuf, int32_t count, void *group)
+{
     auto *xctx = static_cast<XucgComm *>(group);
     if (!xctx || !xctx->owner || !xctx->owner->has_oob)
         return UCG_ERR_INVALID_PARAM;
-    int rc =
-        detail::oob_exchange(&xctx->owner->oob_config, sendbuf, recvbuf, static_cast<int>(count));
+    int rc = detail::oob_exchange(&xctx->owner->oob_config, sendbuf, recvbuf, static_cast<int>(count));
     return (rc == 0) ? UCG_OK : UCG_ERR_INVALID_PARAM;
 }
 
 /* group_rank → global_rank 映射 */
-bool xucg_group_rank_to_global(const XucgComm *xctx, int group_rank, int *global_rank) {
+bool xucg_group_rank_to_global(const XucgComm *xctx, int group_rank, int *global_rank)
+{
     if (!xctx || !global_rank || group_rank < 0 || group_rank >= xctx->owner->nranks)
         return false;
     if (xctx->rank_map != nullptr && static_cast<uint32_t>(group_rank) < xctx->rank_map_size) {
@@ -260,7 +266,8 @@ bool xucg_group_rank_to_global(const XucgComm *xctx, int group_rank, int *global
 
 /* UCG 要建 endpoint 时回调：
  * group_rank → rank_map → 全局地址表 → ucp_ep_create */
-void *xucg_get_ucp_ep(void * /*arg*/, void *oob_group, int group_rank) {
+void *xucg_get_ucp_ep(void * /*arg*/, void *oob_group, int group_rank)
+{
     auto *xctx = static_cast<XucgComm *>(oob_group);
     const int rank = xctx ? xctx->owner->rank : -1;
 
@@ -271,19 +278,17 @@ void *xucg_get_ucp_ep(void * /*arg*/, void *oob_group, int group_rank) {
     }
 
     if (global_peer < 0 || global_peer >= g_xucg.global_nranks) {
-        KuCCL_LOG_WARN(rank, "get_ucp_ep: global rank %d out of [0,%d)", global_peer,
-                       g_xucg.global_nranks);
+        KuCCL_LOG_WARN(rank, "get_ucp_ep: global rank %d out of [0,%d)", global_peer, g_xucg.global_nranks);
         return nullptr;
     }
 
     if (!g_xucg.world_addr_lens || g_xucg.world_addr_lens[global_peer] == 0) {
-        KuCCL_LOG_WARN(rank, "get_ucp_ep: no address for group_rank=%d global_rank=%d", group_rank,
-                       global_peer);
+        KuCCL_LOG_WARN(rank, "get_ucp_ep: no address for group_rank=%d global_rank=%d", group_rank, global_peer);
         return nullptr;
     }
 
-    ucp_address_t *peer_addr = reinterpret_cast<ucp_address_t *>(
-        g_xucg.world_addrs + static_cast<size_t>(global_peer) * g_xucg.max_addr_len);
+    ucp_address_t *peer_addr =
+        reinterpret_cast<ucp_address_t *>(g_xucg.world_addrs + static_cast<size_t>(global_peer) * g_xucg.max_addr_len);
 
     ucp_ep_params_t ep_params;
     std::memset(&ep_params, 0, sizeof(ep_params));
@@ -293,17 +298,18 @@ void *xucg_get_ucp_ep(void * /*arg*/, void *oob_group, int group_rank) {
     ucp_ep_h ep = nullptr;
     const ucs_status_t st = ucp_ep_create(g_xucg.ucp_worker, &ep_params, &ep);
     if (st != UCS_OK) {
-        KuCCL_LOG_WARN(rank, "ucp_ep_create FAILED: rank=%d status=%s", group_rank,
-                       ucs_status_string(st));
+        KuCCL_LOG_WARN(rank, "ucp_ep_create FAILED: rank=%d status=%s", group_rank, ucs_status_string(st));
         return nullptr;
     }
     return static_cast<void *>(ep);
 }
 
-void *xucg_get_ucp_worker(void *) {
+void *xucg_get_ucp_worker(void *)
+{
     return static_cast<void *>(g_xucg.ucp_worker);
 }
-void *xucg_get_ucp_context(void *) {
+void *xucg_get_ucp_context(void *)
+{
     return static_cast<void *>(g_xucg.ucp_context);
 }
 
@@ -312,7 +318,8 @@ void *xucg_get_ucp_context(void *) {
  * node_id 仅在拓扑交换成功（topology_ok，全组一致）时上报——UCG 的 locations[]
  * 用 malloc 分配、仅对上报者赋值，部分上报会被当数组下标用（越界写），
  * 因此必须全组同报或同不报。 */
-ucg_status_t xucg_get_proc_info(ucg_rank_t rank, ucg_proc_info_t **proc) {
+ucg_status_t xucg_get_proc_info(ucg_rank_t rank, ucg_proc_info_t **proc)
+{
     if (proc == nullptr)
         return UCG_ERR_INVALID_PARAM;
     *proc = static_cast<ucg_proc_info_t *>(std::malloc(sizeof(ucg_proc_info_t)));
@@ -322,8 +329,7 @@ ucg_status_t xucg_get_proc_info(ucg_rank_t rank, ucg_proc_info_t **proc) {
     (*proc)->size = sizeof(ucg_proc_info_t);
     (*proc)->num_addr_desc = 0;
     g_topo_queries.fetch_add(1, std::memory_order_relaxed);
-    if (g_xucg.topology_ok && rank >= 0 &&
-        static_cast<uint32_t>(rank) < g_xucg.node_id.size()) {
+    if (g_xucg.topology_ok && rank >= 0 && static_cast<uint32_t>(rank) < g_xucg.node_id.size()) {
         g_topo_reported.fetch_add(1, std::memory_order_relaxed);
         (*proc)->location.field_mask = UCG_LOCATION_FIELD_NODE_ID;
         (*proc)->location.node_id = g_xucg.node_id[static_cast<uint32_t>(rank)];
@@ -339,7 +345,8 @@ ucg_status_t xucg_get_proc_info(ucg_rank_t rank, ucg_proc_info_t **proc) {
  * 两阶段变长地址 allgather
  * ════════════════════════════════════════════════════════════*/
 
-kucclResult_t xucg_build_world_addr_table(kucclComm *world_comm) {
+kucclResult_t xucg_build_world_addr_table(kucclComm *world_comm)
+{
     const int rank = world_comm->rank, ws = world_comm->nranks;
 
     g_xucg.world_addr_lens = static_cast<size_t *>(std::calloc(ws, sizeof(size_t)));
@@ -349,8 +356,8 @@ kucclResult_t xucg_build_world_addr_table(kucclComm *world_comm) {
     }
 
     /* 阶段 A：allgather 各自的 address_len */
-    if (detail::oob_exchange(&world_comm->oob_config, &g_xucg.my_address_len,
-                             g_xucg.world_addr_lens, static_cast<int>(sizeof(size_t))) != 0) {
+    if (detail::oob_exchange(&world_comm->oob_config, &g_xucg.my_address_len, g_xucg.world_addr_lens,
+                             static_cast<int>(sizeof(size_t))) != 0) {
         KuCCL_LOG_ERROR(rank, "OOB allgather (addr lens) FAILED");
         return KuCCL_FAIL;
     }
@@ -381,7 +388,8 @@ kucclResult_t xucg_build_world_addr_table(kucclComm *world_comm) {
  * 进程级一次性初始化
  * ════════════════════════════════════════════════════════════*/
 
-kucclResult_t xucg_process_init_once(kucclComm *world_comm) {
+kucclResult_t xucg_process_init_once(kucclComm *world_comm)
+{
     if (g_xucg.initialized)
         return KuCCL_SUCCESS;
     const int rank = world_comm->rank, ws = world_comm->nranks;
@@ -401,9 +409,8 @@ kucclResult_t xucg_process_init_once(kucclComm *world_comm) {
 
     ucp_params_t up;
     std::memset(&up, 0, sizeof(up));
-    up.field_mask = UCP_PARAM_FIELD_FEATURES | UCP_PARAM_FIELD_REQUEST_SIZE |
-                    UCP_PARAM_FIELD_TAG_SENDER_MASK | UCP_PARAM_FIELD_MT_WORKERS_SHARED |
-                    UCP_PARAM_FIELD_ESTIMATED_NUM_EPS;
+    up.field_mask = UCP_PARAM_FIELD_FEATURES | UCP_PARAM_FIELD_REQUEST_SIZE | UCP_PARAM_FIELD_TAG_SENDER_MASK |
+                    UCP_PARAM_FIELD_MT_WORKERS_SHARED | UCP_PARAM_FIELD_ESTIMATED_NUM_EPS;
     up.features = UCP_FEATURE_TAG;
     up.request_size = sizeof(kuccl_request_placeholder) + 4;
     up.tag_sender_mask = 0x800000fffffffffful;
@@ -464,9 +471,8 @@ kucclResult_t xucg_process_init_once(kucclComm *world_comm) {
     if (topology_enabled()) {
         const uint64_t my_hash = xucg_host_hash();
         std::vector<uint64_t> hashes(static_cast<std::size_t>(ws));
-        const bool hash_ok =
-            detail::oob_exchange(&world_comm->oob_config, &my_hash, hashes.data(),
-                                 static_cast<int>(sizeof(uint64_t))) == 0;
+        const bool hash_ok = detail::oob_exchange(&world_comm->oob_config, &my_hash, hashes.data(),
+                                                  static_cast<int>(sizeof(uint64_t))) == 0;
 
         /* NUMA（socket）交换：与 node_id 同源的全组一致原则——任一 rank
          * 探测失败（发 -1）→ 全组不喂 socket（UCG 的 socket 数组仅对
@@ -474,9 +480,8 @@ kucclResult_t xucg_process_init_once(kucclComm *world_comm) {
          * 探测失败不影响 node_id 的喂入；NUMA 交换失败计入表决。 */
         std::vector<int32_t> numa(static_cast<std::size_t>(ws), -1);
         const int32_t my_numa = xucg_detect_numa();
-        const bool numa_xchg_ok =
-            detail::oob_exchange(&world_comm->oob_config, &my_numa, numa.data(),
-                                 static_cast<int>(sizeof(int32_t))) == 0;
+        const bool numa_xchg_ok = detail::oob_exchange(&world_comm->oob_config, &my_numa, numa.data(),
+                                                       static_cast<int>(sizeof(int32_t))) == 0;
         bool numa_ok_all = numa_xchg_ok;
         for (int i = 0; numa_ok_all && i < ws; ++i)
             numa_ok_all = numa[static_cast<std::size_t>(i)] >= 0;
@@ -484,16 +489,14 @@ kucclResult_t xucg_process_init_once(kucclComm *world_comm) {
         /* 表决轮：哈希交换与 NUMA 交换都成功的 rank 投 1 → 全组一致决策 */
         const uint8_t my_vote = (hash_ok && numa_xchg_ok) ? 1 : 0;
         std::vector<uint8_t> votes(static_cast<std::size_t>(ws));
-        const bool vote_ok =
-            detail::oob_exchange(&world_comm->oob_config, &my_vote, votes.data(), 1) == 0;
+        const bool vote_ok = detail::oob_exchange(&world_comm->oob_config, &my_vote, votes.data(), 1) == 0;
         bool all_ok = (hash_ok && numa_xchg_ok) && vote_ok;
         for (int i = 0; all_ok && i < ws; ++i)
             all_ok = votes[static_cast<std::size_t>(i)] != 0;
 
         if (!all_ok) {
-            KuCCL_LOG_ERROR(rank,
-                            "topology exchange/vote FAILED — degrade to flat model "
-                            "(group-consistent)");
+            KuCCL_LOG_ERROR(rank, "topology exchange/vote FAILED — degrade to flat model "
+                                  "(group-consistent)");
         } else {
             g_xucg.host_hash = std::move(hashes);
             g_xucg.node_id.assign(static_cast<std::size_t>(ws), 0);
@@ -501,8 +504,7 @@ kucclResult_t xucg_process_init_once(kucclComm *world_comm) {
             std::map<uint64_t, int32_t> first_seen;
             int32_t next_node = 0;
             for (int i = 0; i < ws; ++i) {
-                auto ins =
-                    first_seen.emplace(g_xucg.host_hash[static_cast<std::size_t>(i)], next_node);
+                auto ins = first_seen.emplace(g_xucg.host_hash[static_cast<std::size_t>(i)], next_node);
                 g_xucg.node_id[static_cast<std::size_t>(i)] = ins.first->second;
                 if (ins.second)
                     ++next_node;
@@ -519,8 +521,7 @@ kucclResult_t xucg_process_init_once(kucclComm *world_comm) {
                 std::map<int32_t, int32_t> first_socket;
                 int32_t next_socket = 0;
                 for (int i = 0; i < ws; ++i) {
-                    auto ins = first_socket.emplace(
-                        numa[static_cast<std::size_t>(i)], next_socket);
+                    auto ins = first_socket.emplace(numa[static_cast<std::size_t>(i)], next_socket);
                     g_xucg.socket_id[static_cast<std::size_t>(i)] = ins.first->second;
                     if (ins.second)
                         ++next_socket;
@@ -532,8 +533,8 @@ kucclResult_t xucg_process_init_once(kucclComm *world_comm) {
                 KuCCL_LOG_INFO(rank,
                                "topology(src=host-hash): nodes=%d ppn=%u sockets=%d "
                                "my_node=%d my_socket=%d",
-                               static_cast<int>(first_seen.size()), g_xucg.num_local_procs,
-                               g_xucg.nsocket, g_xucg.node_id[static_cast<std::size_t>(rank)],
+                               static_cast<int>(first_seen.size()), g_xucg.num_local_procs, g_xucg.nsocket,
+                               g_xucg.node_id[static_cast<std::size_t>(rank)],
                                g_xucg.socket_id[static_cast<std::size_t>(rank)]);
             } else {
                 KuCCL_LOG_INFO(rank,
@@ -574,8 +575,7 @@ kucclResult_t xucg_process_init_once(kucclComm *world_comm) {
      * 算法/策略表分档只看 get_proc_info 上报的 node_id。 */
     ucg_params_t cp;
     std::memset(&cp, 0, sizeof(cp));
-    cp.field_mask = UCG_PARAMS_FIELD_OOB_GROUP | UCG_PARAMS_FIELD_THREAD_MODE |
-                    UCG_PARAMS_FIELD_PROC_INFO_CB;
+    cp.field_mask = UCG_PARAMS_FIELD_OOB_GROUP | UCG_PARAMS_FIELD_THREAD_MODE | UCG_PARAMS_FIELD_PROC_INFO_CB;
     cp.oob_group.allgather = xucg_ucg_oob_cb;
     cp.oob_group.myrank = static_cast<ucg_rank_t>(rank);
     cp.oob_group.size = static_cast<uint32_t>(ws);
@@ -614,7 +614,8 @@ ucg_op_h g_op_cache[XUCG_OP_CACHE_SIZE] = {};
  * bytes（默认）= UINT8 + 字节数；elem = 真实 dtype + 元素数。
  * 两种语义下 UCG 的 plan 选择不同。
  * allreduce 不受此开关影响：归约必须真实 dtype。 */
-static bool vdt_bytes() {
+static bool vdt_bytes()
+{
     static const bool v = [] {
         const char *e = std::getenv("KUCCL_VDT");
         return e == nullptr || e[0] == '\0' || std::strcmp(e, "bytes") == 0;
@@ -622,25 +623,27 @@ static bool vdt_bytes() {
     return v;
 }
 
-static size_t kuccl_dt_bytes(kucclDataType_t datatype) {
+static size_t kuccl_dt_bytes(kucclDataType_t datatype)
+{
     switch (datatype) {
-    case kucclInt8:
-    case kucclUint8:
-        return 1;
-    case kucclInt32:
-    case kucclUint32:
-    case kucclFloat:
-        return 4;
-    case kucclInt64:
-    case kucclUint64:
-    case kucclDouble:
-        return 8;
-    default:
-        return 0;
+        case kucclInt8:
+        case kucclUint8:
+            return 1;
+        case kucclInt32:
+        case kucclUint32:
+        case kucclFloat:
+            return 4;
+        case kucclInt64:
+        case kucclUint64:
+        case kucclDouble:
+            return 8;
+        default:
+            return 0;
     }
 }
 
-kucclResult_t get_cached_dt(kucclDataType_t datatype, ucg_dt_h *out_dt) {
+kucclResult_t get_cached_dt(kucclDataType_t datatype, ucg_dt_h *out_dt)
+{
     const int idx = static_cast<int>(datatype);
     if (idx < 0 || idx >= XUCG_DT_CACHE_SIZE)
         return KuCCL_FAIL;
@@ -654,40 +657,40 @@ kucclResult_t get_cached_dt(kucclDataType_t datatype, ucg_dt_h *out_dt) {
     decltype(dt_params.type) ucg_dtype;
     size_t dt_size;
     switch (datatype) {
-    case kucclInt8:
-        ucg_dtype = UCG_DT_TYPE_INT8;
-        dt_size = 1;
-        break;
-    case kucclUint8:
-        ucg_dtype = UCG_DT_TYPE_UINT8;
-        dt_size = 1;
-        break;
-    case kucclInt32:
-        ucg_dtype = UCG_DT_TYPE_INT32;
-        dt_size = 4;
-        break;
-    case kucclUint32:
-        ucg_dtype = UCG_DT_TYPE_UINT32;
-        dt_size = 4;
-        break;
-    case kucclInt64:
-        ucg_dtype = UCG_DT_TYPE_INT64;
-        dt_size = 8;
-        break;
-    case kucclUint64:
-        ucg_dtype = UCG_DT_TYPE_UINT64;
-        dt_size = 8;
-        break;
-    case kucclFloat:
-        ucg_dtype = UCG_DT_TYPE_FP32;
-        dt_size = 4;
-        break;
-    case kucclDouble:
-        ucg_dtype = UCG_DT_TYPE_FP64;
-        dt_size = 8;
-        break;
-    default:
-        return KuCCL_FAIL;
+        case kucclInt8:
+            ucg_dtype = UCG_DT_TYPE_INT8;
+            dt_size = 1;
+            break;
+        case kucclUint8:
+            ucg_dtype = UCG_DT_TYPE_UINT8;
+            dt_size = 1;
+            break;
+        case kucclInt32:
+            ucg_dtype = UCG_DT_TYPE_INT32;
+            dt_size = 4;
+            break;
+        case kucclUint32:
+            ucg_dtype = UCG_DT_TYPE_UINT32;
+            dt_size = 4;
+            break;
+        case kucclInt64:
+            ucg_dtype = UCG_DT_TYPE_INT64;
+            dt_size = 8;
+            break;
+        case kucclUint64:
+            ucg_dtype = UCG_DT_TYPE_UINT64;
+            dt_size = 8;
+            break;
+        case kucclFloat:
+            ucg_dtype = UCG_DT_TYPE_FP32;
+            dt_size = 4;
+            break;
+        case kucclDouble:
+            ucg_dtype = UCG_DT_TYPE_FP64;
+            dt_size = 8;
+            break;
+        default:
+            return KuCCL_FAIL;
     }
     dt_params.field_mask = UCG_DT_PARAMS_FIELD_TYPE | UCG_DT_PARAMS_FIELD_SIZE;
     dt_params.type = ucg_dtype;
@@ -699,7 +702,8 @@ kucclResult_t get_cached_dt(kucclDataType_t datatype, ucg_dt_h *out_dt) {
     return KuCCL_SUCCESS;
 }
 
-kucclResult_t get_cached_op(kucclRedOp_t reduction_op, ucg_op_h *out_op) {
+kucclResult_t get_cached_op(kucclRedOp_t reduction_op, ucg_op_h *out_op)
+{
     const int idx = static_cast<int>(reduction_op);
     if (idx < 0 || idx >= XUCG_OP_CACHE_SIZE)
         return KuCCL_FAIL;
@@ -712,17 +716,17 @@ kucclResult_t get_cached_op(kucclRedOp_t reduction_op, ucg_op_h *out_op) {
     std::memset(&op_params, 0, sizeof(op_params));
     decltype(op_params.type) ucg_optype;
     switch (reduction_op) {
-    case kucclSum:
-        ucg_optype = UCG_OP_TYPE_SUM;
-        break;
-    case kucclMin:
-        ucg_optype = UCG_OP_TYPE_MIN;
-        break;
-    case kucclMax:
-        ucg_optype = UCG_OP_TYPE_MAX;
-        break;
-    default:
-        return KuCCL_FAIL;
+        case kucclSum:
+            ucg_optype = UCG_OP_TYPE_SUM;
+            break;
+        case kucclMin:
+            ucg_optype = UCG_OP_TYPE_MIN;
+            break;
+        case kucclMax:
+            ucg_optype = UCG_OP_TYPE_MAX;
+            break;
+        default:
+            return KuCCL_FAIL;
     }
     op_params.field_mask = UCG_OP_PARAMS_FIELD_TYPE;
     op_params.type = ucg_optype;
@@ -734,19 +738,20 @@ kucclResult_t get_cached_op(kucclRedOp_t reduction_op, ucg_op_h *out_op) {
 }
 
 /* datatype 的元素字节大小（不创建 UCG dt，零开销） */
-size_t xucg_dt_size(kucclDataType_t dt) {
+size_t xucg_dt_size(kucclDataType_t dt)
+{
     switch (dt) {
-    case kucclInt8:
-    case kucclUint8:
-        return 1;
-    case kucclInt32:
-    case kucclUint32:
-    case kucclFloat:
-        return 4;
-    case kucclInt64:
-    case kucclUint64:
-    case kucclDouble:
-        return 8;
+        case kucclInt8:
+        case kucclUint8:
+            return 1;
+        case kucclInt32:
+        case kucclUint32:
+        case kucclFloat:
+            return 4;
+        case kucclInt64:
+        case kucclUint64:
+        case kucclDouble:
+            return 8;
     }
     return 0;
 }
@@ -759,8 +764,7 @@ size_t xucg_dt_size(kucclDataType_t dt) {
  * ==========================================================================*/
 
 constexpr int XUCG_PROF_NOPS = 4; /* 0..3：ag/ar/bcast/a2a */
-const char *const XUCG_PROF_NAMES[XUCG_PROF_NOPS] = {"allgather", "allreduce", "broadcast",
-                                                     "alltoall"};
+const char *const XUCG_PROF_NAMES[XUCG_PROF_NOPS] = {"allgather", "allreduce", "broadcast", "alltoall"};
 
 struct ProfOpStats {
     uint64_t n = 0;
@@ -774,38 +778,36 @@ struct ProfOpStats {
 ProfOpStats g_prof_stats[XUCG_PROF_NOPS];
 int g_prof_rank = -1;
 
-inline bool prof_enabled() {
+inline bool prof_enabled()
+{
     static const bool v = [] {
         const char *e = std::getenv("KUCCL_PROFILE");
         if (e == nullptr || e[0] == '\0' || std::strcmp(e, "0") == 0)
             return false;
-        std::atexit(
-            [] { /* dump 一次：只打全局 rank 0（集合通信锁步，各 rank 统计近似；
+        std::atexit([] { /* dump 一次：只打全局 rank 0（集合通信锁步，各 rank 统计近似；
                     128 份同表只刷屏。要看别的 rank 临时改此条件） */
-                 if (g_prof_rank != 0)
-                     return;
-                 std::fprintf(stdout, "[KUCCL_PROFILE][rank %d] %-10s %10s %12s %12s %12s %14s\n",
-                              g_prof_rank, "op", "n", "init_us/op", "start_us/op", "total_us/op",
-                              "test/op");
-                 for (int i = 0; i < XUCG_PROF_NOPS; ++i) {
-                     const ProfOpStats &s = g_prof_stats[i];
-                     if (s.n == 0)
-                         continue;
-                     std::fprintf(
-                         stdout,
-                         "[KUCCL_PROFILE][rank %d] %-10s %10llu %12.2f %12.2f %12.2f %14.1f\n",
-                         g_prof_rank, XUCG_PROF_NAMES[i], static_cast<unsigned long long>(s.n),
-                         s.init_us / s.n, s.start_us / s.n, s.total_us / s.n,
-                         static_cast<double>(s.test_calls) / s.n);
-                 }
-                 std::fflush(stdout);
-            });
+                         if (g_prof_rank != 0)
+                             return;
+                         std::fprintf(stdout, "[KUCCL_PROFILE][rank %d] %-10s %10s %12s %12s %12s %14s\n", g_prof_rank,
+                                      "op", "n", "init_us/op", "start_us/op", "total_us/op", "test/op");
+                         for (int i = 0; i < XUCG_PROF_NOPS; ++i) {
+                             const ProfOpStats &s = g_prof_stats[i];
+                             if (s.n == 0)
+                                 continue;
+                             std::fprintf(stdout, "[KUCCL_PROFILE][rank %d] %-10s %10llu %12.2f %12.2f %12.2f %14.1f\n",
+                                          g_prof_rank, XUCG_PROF_NAMES[i], static_cast<unsigned long long>(s.n),
+                                          s.init_us / s.n, s.start_us / s.n, s.total_us / s.n,
+                                          static_cast<double>(s.test_calls) / s.n);
+                         }
+                         std::fflush(stdout);
+        });
         return true;
     }();
     return v;
 }
 
-inline double prof_us_since(const std::chrono::steady_clock::time_point &t0) {
+inline double prof_us_since(const std::chrono::steady_clock::time_point &t0)
+{
     return std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - t0).count();
 }
 
@@ -822,7 +824,10 @@ inline double prof_us_since(const std::chrono::steady_clock::time_point &t0) {
  * 请求入池复用后指针失效。故仅 AllReduce / Broadcast 入池。
  * ════════════════════════════════════════════════════════════*/
 
-enum { XUCG_PERSIST_AR = 1, XUCG_PERSIST_BCAST = 2 };
+enum {
+    XUCG_PERSIST_AR = 1,
+    XUCG_PERSIST_BCAST = 2
+};
 
 struct PersistentEntry {
     /* key */
@@ -842,7 +847,8 @@ struct PersistentEntry {
 constexpr int XUCG_PERSIST_MAX = 32;
 PersistentEntry g_persist[XUCG_PERSIST_MAX];
 
-inline bool persist_enabled() {
+inline bool persist_enabled()
+{
     static const bool v = [] {
         const char *e = std::getenv("KUCCL_PERSISTENT_REQ");
         return e != nullptr && e[0] != '\0' && std::strcmp(e, "0") != 0;
@@ -851,27 +857,28 @@ inline bool persist_enabled() {
 }
 
 /* 找可复用 entry：key 全匹配且不在飞行中 */
-inline PersistentEntry *persist_find(uint32_t op, kucclDataType_t dt, uint64_t count,
-                                     const void *send, void *recv, int root, kucclComm *comm) {
+inline PersistentEntry *persist_find(uint32_t op, kucclDataType_t dt, uint64_t count, const void *send, void *recv,
+                                     int root, kucclComm *comm)
+{
     for (int i = 0; i < XUCG_PERSIST_MAX; ++i) {
         PersistentEntry &e = g_persist[i];
-        if (e.valid && !e.in_flight && e.op == op && e.dt == dt && e.count == count &&
-            e.send == send && e.recv == recv && e.root == root && e.comm == comm)
+        if (e.valid && !e.in_flight && e.op == op && e.dt == dt && e.count == count && e.send == send &&
+            e.recv == recv && e.root == root && e.comm == comm)
             return &e;
     }
     return nullptr;
 }
 
 /* 找空位存新 entry（无空位/重复则放弃入池，不影响正确性） */
-inline PersistentEntry *persist_store_slot(uint32_t op, kucclDataType_t dt, uint64_t count,
-                                           const void *send, void *recv, int root,
-                                           kucclComm *comm) {
+inline PersistentEntry *persist_store_slot(uint32_t op, kucclDataType_t dt, uint64_t count, const void *send,
+                                           void *recv, int root, kucclComm *comm)
+{
     bool dup = false;
     int free_idx = -1;
     for (int i = 0; i < XUCG_PERSIST_MAX; ++i) {
         PersistentEntry &e = g_persist[i];
-        if (e.valid && e.op == op && e.dt == dt && e.count == count && e.send == send &&
-            e.recv == recv && e.root == root && e.comm == comm) {
+        if (e.valid && e.op == op && e.dt == dt && e.count == count && e.send == send && e.recv == recv &&
+            e.root == root && e.comm == comm) {
             dup = true;
             break;
         }
@@ -885,7 +892,8 @@ inline PersistentEntry *persist_store_slot(uint32_t op, kucclDataType_t dt, uint
 
 /* comm 销毁/abort 时清池（调用方已持锁）。
  * 销毁时仍有 in_flight 请求 = 调用方使用错误，这里尽力 cleanup。 */
-void purge_persistent_for_comm(kucclComm_t comm) {
+void purge_persistent_for_comm(kucclComm_t comm)
+{
     for (int i = 0; i < XUCG_PERSIST_MAX; ++i) {
         PersistentEntry &e = g_persist[i];
         if (e.valid && e.comm == comm) {
@@ -897,7 +905,8 @@ void purge_persistent_for_comm(kucclComm_t comm) {
 }
 
 /* request_info 公共填充（HOST 内存，所有算子一致） */
-inline ucg_request_info_t make_request_info() {
+inline ucg_request_info_t make_request_info()
+{
     ucg_request_info_t info;
     std::memset(&info, 0, sizeof(info));
     info.field_mask = UCG_REQUEST_INFO_FIELD_MEM_TYPE;
@@ -911,8 +920,8 @@ inline ucg_request_info_t make_request_info() {
  * 集合启动：一次调用的 (缓存)dt/op → request_init → start
  * ════════════════════════════════════════════════════════════*/
 
-static kucclResult_t xucg_coll_start(kucclComm *comm, CollOp op, const CollParams *p,
-                                     kucclRequest *req) {
+static kucclResult_t xucg_coll_start(kucclComm *comm, CollOp op, const CollParams *p, kucclRequest *req)
+{
     const int rank = comm->rank;
     const bool prof = prof_enabled();
     if (prof && g_prof_rank < 0)
@@ -930,8 +939,8 @@ static kucclResult_t xucg_coll_start(kucclComm *comm, CollOp op, const CollParam
     /* ── 持久化快路径：同 key 集合直接 start，零 init（默认关）── */
     if (persist_enabled() && (op == CollOp::AllReduce || op == CollOp::Broadcast)) {
         const uint32_t pop = (op == CollOp::AllReduce) ? XUCG_PERSIST_AR : XUCG_PERSIST_BCAST;
-        PersistentEntry *e = persist_find(pop, p->datatype, static_cast<uint64_t>(p->count),
-                                          p->sendbuff, p->recvbuff, p->root, comm);
+        PersistentEntry *e =
+            persist_find(pop, p->datatype, static_cast<uint64_t>(p->count), p->sendbuff, p->recvbuff, p->root, comm);
         if (e != nullptr) {
             if (ucg_request_start(e->req) == UCG_OK) {
                 e->in_flight = true;
@@ -975,112 +984,109 @@ static kucclResult_t xucg_coll_start(kucclComm *comm, CollOp op, const CollParam
     ucg_status_t st = UCG_OK;
 
     switch (op) {
-    case CollOp::AllGather: {
-        /* 等长 allgatherv 参数（挂 priv 保活）。dtype 语义由 KUCCL_VDT 决定。 */
-        const int nranks = comm->nranks;
-        std::vector<int32_t> &recvcounts = priv->keep_v[0];
-        std::vector<int32_t> &displs = priv->keep_v[1];
-        ucg_dt_h vdt = dt;
-        int32_t unit = static_cast<int32_t>(p->count);
-        if (vdt_bytes()) {
-            const size_t nb = static_cast<size_t>(p->count) * kuccl_dt_bytes(p->datatype);
-            if (nb > static_cast<size_t>(std::numeric_limits<int32_t>::max())) {
-                detail::err_record("allgatherv bytes mode: per-rank bytes overflow int32");
-                delete priv;
-                return KuCCL_FAIL;
+        case CollOp::AllGather: {
+            /* 等长 allgatherv 参数（挂 priv 保活）。dtype 语义由 KUCCL_VDT 决定。 */
+            const int nranks = comm->nranks;
+            std::vector<int32_t> &recvcounts = priv->keep_v[0];
+            std::vector<int32_t> &displs = priv->keep_v[1];
+            ucg_dt_h vdt = dt;
+            int32_t unit = static_cast<int32_t>(p->count);
+            if (vdt_bytes()) {
+                const size_t nb = static_cast<size_t>(p->count) * kuccl_dt_bytes(p->datatype);
+                if (nb > static_cast<size_t>(std::numeric_limits<int32_t>::max())) {
+                    detail::err_record("allgatherv bytes mode: per-rank bytes overflow int32");
+                    delete priv;
+                    return KuCCL_FAIL;
+                }
+                if (get_cached_dt(kucclUint8, &vdt) != KuCCL_SUCCESS) {
+                    detail::err_record("allgatherv: get uint8 dt FAILED");
+                    delete priv;
+                    return KuCCL_FAIL;
+                }
+                unit = static_cast<int32_t>(nb);
             }
-            if (get_cached_dt(kucclUint8, &vdt) != KuCCL_SUCCESS) {
-                detail::err_record("allgatherv: get uint8 dt FAILED");
-                delete priv;
-                return KuCCL_FAIL;
-            }
-            unit = static_cast<int32_t>(nb);
+            recvcounts.assign(nranks, unit);
+            displs.assign(nranks, 0);
+            for (int i = 1; i < nranks; ++i)
+                displs[i] = displs[i - 1] + recvcounts[i - 1];
+            st = ucg_request_allgatherv_init(p->sendbuff, unit, vdt, p->recvbuff, recvcounts.data(), displs.data(), vdt,
+                                             xctx->group, &info, UCG_REQUEST_BLOCKING, &ucg_req);
+            break;
         }
-        recvcounts.assign(nranks, unit);
-        displs.assign(nranks, 0);
-        for (int i = 1; i < nranks; ++i)
-            displs[i] = displs[i - 1] + recvcounts[i - 1];
-        st = ucg_request_allgatherv_init(p->sendbuff, unit, vdt, p->recvbuff,
-                                         recvcounts.data(), displs.data(), vdt, xctx->group, &info,
-                                         UCG_REQUEST_BLOCKING, &ucg_req);
-        break;
-    }
-    case CollOp::AllReduce:
-        /* count 是元素个数，不是字节数！ */
-        st = ucg_request_allreduce_init(p->sendbuff, p->recvbuff, static_cast<int>(p->count), dt,
-                                        op_h, xctx->group, &info, UCG_REQUEST_BLOCKING, &ucg_req);
-        break;
-    case CollOp::Broadcast: {
-        /* dtype 语义随 KUCCL_VDT。原地：buf 既收也发。 */
-        ucg_dt_h vdt = dt;
-        int32_t unit = static_cast<int32_t>(p->count);
-        if (vdt_bytes()) {
-            const size_t nb = static_cast<size_t>(p->count) * kuccl_dt_bytes(p->datatype);
-            if (nb > static_cast<size_t>(std::numeric_limits<int32_t>::max())) {
-                detail::err_record("bcast bytes mode: bytes overflow int32");
-                delete priv;
-                return KuCCL_FAIL;
+        case CollOp::AllReduce:
+            /* count 是元素个数，不是字节数！ */
+            st = ucg_request_allreduce_init(p->sendbuff, p->recvbuff, static_cast<int>(p->count), dt, op_h, xctx->group,
+                                            &info, UCG_REQUEST_BLOCKING, &ucg_req);
+            break;
+        case CollOp::Broadcast: {
+            /* dtype 语义随 KUCCL_VDT。原地：buf 既收也发。 */
+            ucg_dt_h vdt = dt;
+            int32_t unit = static_cast<int32_t>(p->count);
+            if (vdt_bytes()) {
+                const size_t nb = static_cast<size_t>(p->count) * kuccl_dt_bytes(p->datatype);
+                if (nb > static_cast<size_t>(std::numeric_limits<int32_t>::max())) {
+                    detail::err_record("bcast bytes mode: bytes overflow int32");
+                    delete priv;
+                    return KuCCL_FAIL;
+                }
+                if (get_cached_dt(kucclUint8, &vdt) != KuCCL_SUCCESS) {
+                    detail::err_record("bcast: get uint8 dt FAILED");
+                    delete priv;
+                    return KuCCL_FAIL;
+                }
+                unit = static_cast<int32_t>(nb);
             }
-            if (get_cached_dt(kucclUint8, &vdt) != KuCCL_SUCCESS) {
-                detail::err_record("bcast: get uint8 dt FAILED");
-                delete priv;
-                return KuCCL_FAIL;
-            }
-            unit = static_cast<int32_t>(nb);
+            st = ucg_request_bcast_init(p->recvbuff, unit, vdt, p->root, xctx->group, &info, UCG_REQUEST_BLOCKING,
+                                        &ucg_req);
+            break;
         }
-        st = ucg_request_bcast_init(p->recvbuff, unit, vdt, p->root,
-                                    xctx->group, &info, UCG_REQUEST_BLOCKING, &ucg_req);
-        break;
-    }
-    case CollOp::AllToAll: {
-        /* 等长 alltoallv 参数（挂 priv 保活）。dtype 语义由 KUCCL_VDT 决定。 */
-        const int nranks = comm->nranks;
-        std::vector<int32_t> &sendcounts = priv->keep_v[0];
-        std::vector<int32_t> &sdispls = priv->keep_v[1];
-        std::vector<int32_t> &recvcounts = priv->keep_v[2];
-        std::vector<int32_t> &rdispls = priv->keep_v[3];
-        ucg_dt_h vdt = dt;
-        int32_t unit = static_cast<int32_t>(p->count);
-        if (vdt_bytes()) {
-            const size_t nb = static_cast<size_t>(p->count) * kuccl_dt_bytes(p->datatype);
-            if (nb > static_cast<size_t>(std::numeric_limits<int32_t>::max())) {
-                detail::err_record("alltoallv bytes mode: per-peer bytes overflow int32");
-                delete priv;
-                return KuCCL_FAIL;
+        case CollOp::AllToAll: {
+            /* 等长 alltoallv 参数（挂 priv 保活）。dtype 语义由 KUCCL_VDT 决定。 */
+            const int nranks = comm->nranks;
+            std::vector<int32_t> &sendcounts = priv->keep_v[0];
+            std::vector<int32_t> &sdispls = priv->keep_v[1];
+            std::vector<int32_t> &recvcounts = priv->keep_v[2];
+            std::vector<int32_t> &rdispls = priv->keep_v[3];
+            ucg_dt_h vdt = dt;
+            int32_t unit = static_cast<int32_t>(p->count);
+            if (vdt_bytes()) {
+                const size_t nb = static_cast<size_t>(p->count) * kuccl_dt_bytes(p->datatype);
+                if (nb > static_cast<size_t>(std::numeric_limits<int32_t>::max())) {
+                    detail::err_record("alltoallv bytes mode: per-peer bytes overflow int32");
+                    delete priv;
+                    return KuCCL_FAIL;
+                }
+                if (get_cached_dt(kucclUint8, &vdt) != KuCCL_SUCCESS) {
+                    detail::err_record("alltoallv: get uint8 dt FAILED");
+                    delete priv;
+                    return KuCCL_FAIL;
+                }
+                unit = static_cast<int32_t>(nb);
             }
-            if (get_cached_dt(kucclUint8, &vdt) != KuCCL_SUCCESS) {
-                detail::err_record("alltoallv: get uint8 dt FAILED");
-                delete priv;
-                return KuCCL_FAIL;
+            sendcounts.assign(nranks, unit);
+            sdispls.assign(nranks, 0);
+            recvcounts.assign(nranks, unit);
+            rdispls.assign(nranks, 0);
+            for (int i = 1; i < nranks; ++i) {
+                sdispls[i] = sdispls[i - 1] + sendcounts[i - 1];
+                rdispls[i] = rdispls[i - 1] + recvcounts[i - 1];
             }
-            unit = static_cast<int32_t>(nb);
+            st = ucg_request_alltoallv_init(p->sendbuff, sendcounts.data(), sdispls.data(), vdt, p->recvbuff,
+                                            recvcounts.data(), rdispls.data(), vdt, xctx->group, &info,
+                                            UCG_REQUEST_BLOCKING, &ucg_req);
+            break;
         }
-        sendcounts.assign(nranks, unit);
-        sdispls.assign(nranks, 0);
-        recvcounts.assign(nranks, unit);
-        rdispls.assign(nranks, 0);
-        for (int i = 1; i < nranks; ++i) {
-            sdispls[i] = sdispls[i - 1] + sendcounts[i - 1];
-            rdispls[i] = rdispls[i - 1] + recvcounts[i - 1];
-        }
-        st = ucg_request_alltoallv_init(p->sendbuff, sendcounts.data(), sdispls.data(), vdt,
-                                        p->recvbuff, recvcounts.data(), rdispls.data(), vdt,
-                                        xctx->group, &info, UCG_REQUEST_BLOCKING, &ucg_req);
-        break;
-    }
-    default:
-        detail::err_record("xucg: unsupported coll op %d", static_cast<int>(op));
-        delete priv;
-        return KuCCL_FAIL;
+        default:
+            detail::err_record("xucg: unsupported coll op %d", static_cast<int>(op));
+            delete priv;
+            return KuCCL_FAIL;
     }
 
     if (prof)
         g_prof_stats[priv->op_id].init_us += prof_us_since(prof_t_init);
     if (st != UCG_OK) {
-        detail::err_record("xucg: ucg_request init FAILED op=%d st=%d", static_cast<int>(op),
-                           static_cast<int>(st));
-        KuCCL_LOG_ERROR(rank, "op=%d: ucg_request init FAILED st=%d", static_cast<int>(op),
-                        static_cast<int>(st));
+        detail::err_record("xucg: ucg_request init FAILED op=%d st=%d", static_cast<int>(op), static_cast<int>(st));
+        KuCCL_LOG_ERROR(rank, "op=%d: ucg_request init FAILED st=%d", static_cast<int>(op), static_cast<int>(st));
         delete priv;
         return KuCCL_FAIL;
     }
@@ -1091,10 +1097,8 @@ static kucclResult_t xucg_coll_start(kucclComm *comm, CollOp op, const CollParam
     if (prof)
         g_prof_stats[priv->op_id].start_us += prof_us_since(prof_t_start);
     if (st != UCG_OK) {
-        detail::err_record("xucg: ucg_request_start FAILED op=%d st=%d", static_cast<int>(op),
-                           static_cast<int>(st));
-        KuCCL_LOG_ERROR(rank, "op=%d: ucg_request_start FAILED st=%d", static_cast<int>(op),
-                        static_cast<int>(st));
+        detail::err_record("xucg: ucg_request_start FAILED op=%d st=%d", static_cast<int>(op), static_cast<int>(st));
+        KuCCL_LOG_ERROR(rank, "op=%d: ucg_request_start FAILED st=%d", static_cast<int>(op), static_cast<int>(st));
         ucg_request_cleanup(ucg_req);
         delete priv;
         return KuCCL_FAIL;
@@ -1106,9 +1110,8 @@ static kucclResult_t xucg_coll_start(kucclComm *comm, CollOp op, const CollParam
     /* 入池：下次同 key 调用免 init（默认关；池满/重复则放弃） */
     if (persist_enabled() && (op == CollOp::AllReduce || op == CollOp::Broadcast)) {
         const uint32_t pop = (op == CollOp::AllReduce) ? XUCG_PERSIST_AR : XUCG_PERSIST_BCAST;
-        PersistentEntry *slot =
-            persist_store_slot(pop, p->datatype, static_cast<uint64_t>(p->count), p->sendbuff,
-                               p->recvbuff, p->root, comm);
+        PersistentEntry *slot = persist_store_slot(pop, p->datatype, static_cast<uint64_t>(p->count), p->sendbuff,
+                                                   p->recvbuff, p->root, comm);
         if (slot != nullptr) {
             slot->op = pop;
             slot->dt = p->datatype;
@@ -1136,7 +1139,8 @@ static kucclResult_t xucg_coll_start(kucclComm *comm, CollOp op, const CollParam
  * 完成时回收 priv（持久化请求归还池）
  * ════════════════════════════════════════════════════════════*/
 
-static kucclResult_t xucg_req_test(kucclRequest *req, int *flag, kucclStatus_t *status) {
+static kucclResult_t xucg_req_test(kucclRequest *req, int *flag, kucclStatus_t *status)
+{
     auto *priv = static_cast<XucgReq *>(req->priv);
     const bool prof = prof_enabled();
     if (prof)
@@ -1184,7 +1188,8 @@ static kucclResult_t xucg_req_test(kucclRequest *req, int *flag, kucclStatus_t *
 
 /* 取消请求（看门狗超时路径）：UCG cancel 语义——cleanup 在飞请求、
  * 持久化 entry 失效、回收私有状态 */
-static void xucg_req_cancel(kucclRequest *req) {
+static void xucg_req_cancel(kucclRequest *req)
+{
     auto *priv = static_cast<XucgReq *>(req->priv);
     if (priv == nullptr)
         return;
@@ -1201,11 +1206,13 @@ static void xucg_req_cancel(kucclRequest *req) {
  * 通信域生命周期：process_init / group_init / group_fini / flush
  * ════════════════════════════════════════════════════════════*/
 
-static kucclResult_t xucg_process_init(kucclComm *comm) {
+static kucclResult_t xucg_process_init(kucclComm *comm)
+{
     return xucg_process_init_once(comm);
 }
 
-static void xucg_process_finalize() {
+static void xucg_process_finalize()
+{
     if (!g_xucg.initialized)
         return;
     if (g_xucg.ucg_context)
@@ -1221,7 +1228,8 @@ static void xucg_process_finalize() {
     g_xucg = XucgGlobal{};
 }
 
-static kucclResult_t xucg_group_init(kucclComm *comm) {
+static kucclResult_t xucg_group_init(kucclComm *comm)
+{
     const int rank = comm->rank;
     const int nranks = comm->nranks;
 
@@ -1239,9 +1247,8 @@ static kucclResult_t xucg_group_init(kucclComm *comm) {
     std::vector<XucgBootstrapRecord> bootstrap_records(static_cast<std::size_t>(nranks));
     XucgBootstrapRecord my_record{};
     my_record.global_rank = static_cast<int32_t>(g_xucg.global_rank);
-    my_record.instance_token =
-        xucg_mix64(static_cast<uint64_t>(::getpid()) * 0x9e3779b97f4a7c15ULL +
-                   std::chrono::steady_clock::now().time_since_epoch().count());
+    my_record.instance_token = xucg_mix64(static_cast<uint64_t>(::getpid()) * 0x9e3779b97f4a7c15ULL +
+                                          std::chrono::steady_clock::now().time_since_epoch().count());
     my_record.host_hash = xucg_host_hash();
 
     if (detail::oob_exchange(&comm->oob_config, &my_record, bootstrap_records.data(),
@@ -1291,9 +1298,8 @@ static kucclResult_t xucg_group_init(kucclComm *comm) {
     /* ucg_group_create */
     ucg_group_params_t gpm;
     std::memset(&gpm, 0, sizeof(gpm));
-    gpm.field_mask = UCG_GROUP_PARAMS_FIELD_ID | UCG_GROUP_PARAMS_FIELD_SIZE |
-                     UCG_GROUP_PARAMS_FIELD_MYRANK | UCG_GROUP_PARAMS_FIELD_RANK_MAP |
-                     UCG_GROUP_PARAMS_FIELD_OOB_GROUP;
+    gpm.field_mask = UCG_GROUP_PARAMS_FIELD_ID | UCG_GROUP_PARAMS_FIELD_SIZE | UCG_GROUP_PARAMS_FIELD_MYRANK |
+                     UCG_GROUP_PARAMS_FIELD_RANK_MAP | UCG_GROUP_PARAMS_FIELD_OOB_GROUP;
     gpm.id = xctx->group_id;
     gpm.size = static_cast<uint32_t>(nranks);
     gpm.myrank = static_cast<ucg_rank_t>(rank);
@@ -1320,20 +1326,17 @@ static kucclResult_t xucg_group_init(kucclComm *comm) {
                        nranks, xctx->group_id, g_xucg.nnode, g_xucg.num_local_procs,
                        g_xucg.socket_ok ? g_xucg.nsocket : 0,
                        g_xucg.node_id[static_cast<std::size_t>(g_xucg.global_rank)],
-                       g_xucg.socket_ok
-                           ? g_xucg.socket_id[static_cast<std::size_t>(g_xucg.global_rank)]
-                           : -1,
-                       g_topo_queries.load(std::memory_order_relaxed),
-                       g_topo_reported.load(std::memory_order_relaxed));
+                       g_xucg.socket_ok ? g_xucg.socket_id[static_cast<std::size_t>(g_xucg.global_rank)] : -1,
+                       g_topo_queries.load(std::memory_order_relaxed), g_topo_reported.load(std::memory_order_relaxed));
     } else {
-        KuCCL_LOG_INFO(rank,
-                       "xucg group created (nranks=%d, group_id=%u); topo NOT fed (flat model)",
-                       nranks, xctx->group_id);
+        KuCCL_LOG_INFO(rank, "xucg group created (nranks=%d, group_id=%u); topo NOT fed (flat model)", nranks,
+                       xctx->group_id);
     }
     return KuCCL_SUCCESS;
 }
 
-static void xucg_group_fini(kucclComm *comm) {
+static void xucg_group_fini(kucclComm *comm)
+{
     auto *xctx = static_cast<XucgComm *>(comm->be_ctx);
     if (xctx == nullptr)
         return;
@@ -1344,11 +1347,13 @@ static void xucg_group_fini(kucclComm *comm) {
     comm->be_ctx = nullptr;
 }
 
-static void xucg_comm_purge(kucclComm *comm) {
+static void xucg_comm_purge(kucclComm *comm)
+{
     purge_persistent_for_comm(comm);
 }
 
-static kucclResult_t xucg_flush(kucclComm *comm) {
+static kucclResult_t xucg_flush(kucclComm *comm)
+{
     (void)comm;
     if (g_xucg.ucp_worker) {
         ucp_worker_flush(g_xucg.ucp_worker);
@@ -1360,11 +1365,11 @@ static kucclResult_t xucg_flush(kucclComm *comm) {
  * 操作表注册
  * ════════════════════════════════════════════════════════════*/
 
-const Ops *xucg_ops() {
+const Ops *xucg_ops()
+{
     static const Ops ops = {
-        "xucg",           &xucg_process_init, &xucg_process_finalize, &xucg_group_init,
-        &xucg_group_fini, &xucg_coll_start,   &xucg_req_test,         &xucg_req_cancel,
-        &xucg_comm_purge, &xucg_flush,
+        "xucg",           &xucg_process_init, &xucg_process_finalize, &xucg_group_init, &xucg_group_fini,
+        &xucg_coll_start, &xucg_req_test,     &xucg_req_cancel,       &xucg_comm_purge, &xucg_flush,
     };
     return &ops;
 }

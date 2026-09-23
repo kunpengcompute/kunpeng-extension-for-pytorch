@@ -46,4 +46,3 @@ python "${SCRIPT_DIR}/tests/correctness.py" --backends gloo
 
 echo ""
 echo "══════ 全部通过 ══════"
-echo "下一步（性能 A/B）：docs/优化记录.md §4"

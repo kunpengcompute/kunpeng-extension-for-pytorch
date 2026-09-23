@@ -24,7 +24,8 @@ namespace kuccl {
 namespace detail {
 
 /* 错误历史深度（env 覆盖：KUCCL_ERR_HISTORY=N） */
-static int err_history_depth() {
+static int err_history_depth()
+{
     static const int n = [] {
         const char *e = std::getenv("KUCCL_ERR_HISTORY");
         int v = e ? std::atoi(e) : 4;
@@ -47,13 +48,15 @@ struct ErrRing {
     int count = 0; /* 已用槽数 */
 };
 
-static ErrRing &tls_ring() {
+static ErrRing &tls_ring()
+{
     static thread_local ErrRing ring;
     return ring;
 }
 
 /* 写入一条错误（内部使用） */
-void err_record(const char *fmt, ...) {
+void err_record(const char *fmt, ...)
+{
     ErrRing &ring = tls_ring();
     ErrSlot &slot = ring.slots[ring.next % 8];
     va_list ap;
@@ -79,7 +82,8 @@ void err_clear(void)
 }
 
 /* 取最近一条并清空（kucclGetLastError 用） */
-const char *err_take_last() {
+const char *err_take_last()
+{
     ErrRing &ring = tls_ring();
     if (ring.count == 0)
         return nullptr;
@@ -93,7 +97,8 @@ const char *err_take_last() {
 }
 
 /* 只读最近一条（不清空——调试用） */
-const char *err_peek_last() {
+const char *err_peek_last()
+{
     ErrRing &ring = tls_ring();
     if (ring.count == 0)
         return nullptr;
@@ -102,7 +107,8 @@ const char *err_peek_last() {
 }
 
 /* 追加上下文（"调用链补信息"模式：底层记 UCG 状态，上层补算子名） */
-void err_append(const char *ctx) {
+void err_append(const char *ctx)
+{
     ErrRing &ring = tls_ring();
     if (ring.count == 0)
         return; /* 没有前置错误，丢弃 */
@@ -132,7 +138,8 @@ extern "C" {
  *           fprintf(stderr, "kuccl: %s\n", kucclGetLastError());
  *       }
  * ════════════════════════════════════════════════════════════*/
-KuCCL_API const char *kucclGetLastError() {
+KuCCL_API const char *kucclGetLastError()
+{
     return kuccl::detail::err_take_last();
 }
 

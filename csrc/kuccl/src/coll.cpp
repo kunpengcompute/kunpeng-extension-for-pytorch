@@ -30,7 +30,8 @@ namespace {
  *   超过 N 毫秒未完成 → 返回 KuCCL_FAIL + 错误信息（含已等待时长）。
  *   防止"对端掉线导致 kucclTest 永久 INPROGRESS"卡死整进程。
  * ==========================================================================*/
-inline int64_t test_timeout_ms() {
+inline int64_t test_timeout_ms()
+{
     static const int64_t v = [] {
         const char *e = std::getenv("KUCCL_TEST_TIMEOUT_MS");
         return e ? static_cast<int64_t>(std::atoll(e)) : 0;
@@ -39,24 +40,26 @@ inline int64_t test_timeout_ms() {
 }
 
 /* 算子名（诊断信息用；与公开接口一一对应） */
-const char *coll_op_name(kuccl::backend::CollOp op) {
+const char *coll_op_name(kuccl::backend::CollOp op)
+{
     using kuccl::backend::CollOp;
     switch (op) {
-    case CollOp::AllGather:
-        return "allgather";
-    case CollOp::AllReduce:
-        return "allreduce";
-    case CollOp::Broadcast:
-        return "broadcast";
-    case CollOp::AllToAll:
-        return "alltoall";
+        case CollOp::AllGather:
+            return "allgather";
+        case CollOp::AllReduce:
+            return "allreduce";
+        case CollOp::Broadcast:
+            return "broadcast";
+        case CollOp::AllToAll:
+            return "alltoall";
     }
     return "op";
 }
 
 /* abort 快速通道：aborted 后拒绝一切新操作。
  * 调用方必须已持 g_api_lock（锁在公开函数体内获取，覆盖整个函数体）。 */
-kucclResult_t coll_entry_guard(kucclComm_t comm, const char *who) {
+kucclResult_t coll_entry_guard(kucclComm_t comm, const char *who)
+{
     if (!comm) {
         kuccl::detail::err_record("%s: comm is NULL", who);
         return KuCCL_FAIL;
@@ -78,12 +81,11 @@ extern "C" {
 /* ----------------------------------------------------------------------------
  * kucclAllGather —— 每进程贡献 sendcount 个元素，所有进程收到全部拼接
  * --------------------------------------------------------------------------*/
-KuCCL_API kucclResult_t kucclAllGather(const void *sendbuff, void *recvbuff, size_t sendcount,
-                                       kucclDataType_t datatype, kucclComm_t comm,
-                                       kucclRequest_t *request) {
+KuCCL_API kucclResult_t kucclAllGather(const void *sendbuff, void *recvbuff, size_t sendcount, kucclDataType_t datatype,
+                                       kucclComm_t comm, kucclRequest_t *request)
+{
     if (!sendbuff || !recvbuff || sendcount == 0) {
-        detail::err_record("kucclAllGather: sendbuff/recvbuf 为空或 sendcount=0 (sendcount=%d)",
-                           sendcount);
+        kuccl::detail::err_record("kucclAllGather: sendbuff/recvbuf 为空或 sendcount=0 (sendcount=%zu)", sendcount);
         return KuCCL_FAIL;
     }
     std::lock_guard<std::recursive_mutex> api_lock(kuccl::detail::g_api_lock);
@@ -114,11 +116,11 @@ KuCCL_API kucclResult_t kucclAllGather(const void *sendbuff, void *recvbuff, siz
  * kucclAllReduce —— 所有进程数据按 reduction_op 归约，结果写入 recvbuff
  *   ★必须用真实 dtype，否则逐字节归约出错
  * --------------------------------------------------------------------------*/
-KuCCL_API kucclResult_t kucclAllReduce(void *sendbuff, void *recvbuff, size_t count,
-                                       kucclDataType_t datatype, kucclRedOp_t reduction_op,
-                                       kucclComm_t comm, kucclRequest_t *request) {
+KuCCL_API kucclResult_t kucclAllReduce(void *sendbuff, void *recvbuff, size_t count, kucclDataType_t datatype,
+                                       kucclRedOp_t reduction_op, kucclComm_t comm, kucclRequest_t *request)
+{
     if (!sendbuff || !recvbuff || count == 0) {
-        detail::err_record("%s: sendbuff/recvbuf 为空或 count=0 (count=%zu)", __func__, count);
+        kuccl::detail::err_record("%s: sendbuff/recvbuf 为空或 count=0 (count=%zu)", __func__, count);
         return KuCCL_FAIL;
     }
     std::lock_guard<std::recursive_mutex> api_lock(kuccl::detail::g_api_lock);
@@ -149,15 +151,15 @@ KuCCL_API kucclResult_t kucclAllReduce(void *sendbuff, void *recvbuff, size_t co
 /* ----------------------------------------------------------------------------
  * kucclBroadcast —— root 进程数据广播给所有进程
  * --------------------------------------------------------------------------*/
-KuCCL_API kucclResult_t kucclBroadcast(const void *sendbuff, void *recvbuff, size_t count,
-                                       kucclDataType_t datatype, int root, kucclComm_t comm,
-                                       kucclRequest_t *request) {
+KuCCL_API kucclResult_t kucclBroadcast(const void *sendbuff, void *recvbuff, size_t count, kucclDataType_t datatype,
+                                       int root, kucclComm_t comm, kucclRequest_t *request)
+{
     if (!sendbuff || !recvbuff || count == 0) {
-        detail::err_record("%s: sendbuff/recvbuf 为空或 count=0 (count=%zu)", __func__, count);
+        kuccl::detail::err_record("%s: sendbuff/recvbuf 为空或 count=0 (count=%zu)", __func__, count);
         return KuCCL_FAIL;
     }
     if (root < 0 || root >= comm->nranks) {
-        detail::err_record("kucclBroadcast: root 越界 (root=%d nranks=%d)", root, comm->nranks);
+        kuccl::detail::err_record("kucclBroadcast: root 越界 (root=%d nranks=%d)", root, comm->nranks);
         return KuCCL_FAIL;
     }
     std::lock_guard<std::recursive_mutex> api_lock(kuccl::detail::g_api_lock);
@@ -188,11 +190,11 @@ KuCCL_API kucclResult_t kucclBroadcast(const void *sendbuff, void *recvbuff, siz
 /* ----------------------------------------------------------------------------
  * kucclAllToAll —— 所有进程之间等长全交换
  * --------------------------------------------------------------------------*/
-KuCCL_API kucclResult_t kucclAllToAll(const void *sendbuff, void *recvbuff, size_t count,
-                                      kucclDataType_t datatype, kucclComm_t comm,
-                                      kucclRequest_t *request) {
+KuCCL_API kucclResult_t kucclAllToAll(const void *sendbuff, void *recvbuff, size_t count, kucclDataType_t datatype,
+                                      kucclComm_t comm, kucclRequest_t *request)
+{
     if (!sendbuff || !recvbuff || count == 0) {
-        detail::err_record("%s: sendbuff/recvbuf 为空或 count=0 (count=%zu)", __func__, count);
+        kuccl::detail::err_record("%s: sendbuff/recvbuf 为空或 count=0 (count=%zu)", __func__, count);
         return KuCCL_FAIL;
     }
     std::lock_guard<std::recursive_mutex> api_lock(kuccl::detail::g_api_lock);
@@ -226,7 +228,8 @@ KuCCL_API kucclResult_t kucclAllToAll(const void *sendbuff, void *recvbuff, size
  *   没就绪才由后端推进（ucg_progress）。
  *   完成/出错时后端回收私有状态，这里释放请求外壳。
  * --------------------------------------------------------------------------*/
-KuCCL_API kucclResult_t kucclTest(kucclRequest_t *request, int *flag, kucclStatus_t *status) {
+KuCCL_API kucclResult_t kucclTest(kucclRequest_t *request, int *flag, kucclStatus_t *status)
+{
     if (!request || !*request || !flag || !status)
         return KuCCL_FAIL;
     /* test/progress 都触碰共享后端资源：与算子入口同一把锁串行化 */
@@ -238,9 +241,8 @@ KuCCL_API kucclResult_t kucclTest(kucclRequest_t *request, int *flag, kucclStatu
     /* 看门狗：超时返回失败（含诊断信息）——仅当配置了超时 */
     const int64_t timeout = test_timeout_ms();
     if (timeout > 0) {
-        auto waited = std::chrono::duration_cast<std::chrono::milliseconds>(
-                          std::chrono::steady_clock::now() - req->t0)
-                          .count();
+        auto waited =
+            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - req->t0).count();
         if (waited > timeout) {
             kuccl::detail::err_record("kucclTest: watchdog timeout after %lld ms (op=%s) — "
                                       "peer likely dead or comm aborted",
