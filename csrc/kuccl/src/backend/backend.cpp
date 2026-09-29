@@ -9,7 +9,8 @@
 namespace kuccl {
 namespace backend {
 
-const Ops *get(const char *name) {
+const Ops *get(const char *name)
+{
     if (name == nullptr || name[0] == '\0')
         return xucg_ops();
     if (std::strcmp(name, "xucg") == 0)

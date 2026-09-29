@@ -1,92 +1,104 @@
-# torch_kuccl — PyTorch c10d 适配层
+# torch_kuccl — PyTorch 适配层
 
-PyTorch c10d 适配层：链接 libkuccl.so，把 kuccl 注册为 PyTorch 的 backend。
-本包**不含任何 kuccl 库代码**，只是薄适配层（OOB 桥接 + Work 封装 + auto-register）。
+把 kuccl 注册为 PyTorch backend 的薄适配层（OOB 桥接 + Work 封装 + auto-register），
+本包不含 kuccl 库代码，链接 `../kuccl/build/libkuccl.so`。
 
-## 与 kuccl 库的关系
+## 环境准备
 
-```
-torch_kuccl（本目录）         kuccl（../kuccl，库本体）
-  c10d Backend 实现                   纯 C 接口，零 torch
-  c10d::BackendKuccl                  纯 C 接口，零 torch
-  import kuccl                        MPI 程序可直接链接
-  链接 libkuccl.so ──────────────────►
-```
-
-## 前置
-
-先构建 kuccl 库（`cd ../kuccl && ./build.sh`），然后（两包独立构建，各管各的）：
+前置：鲲鹏节点 + HPCKit（含 HUCX / XUCG / hmpi）。
 
 ```bash
-cd torch_kuccl
-./build.sh          # 前置检查 + 编译 + import 门禁（环境由 ../kuccl/env.sh 提供）
-# 产物：kuccl_backend.so（链接 ../kuccl/build/libkuccl.so）
+# 1) Python 环境
+conda create -n kuccl python=3.12 -y
+conda activate kuccl
+
+# 2) 安装 PyTorch（CPU 版）
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+# 3) 库环境（两个脚本独立，都要 source）
+cd csrc/kuccl      && source kuccl_env.sh    # HPCKit 路径，不对时先 export HPCKIT=<路径>
+cd ../torch_kuccl  && source env.sh          # conda + TORCH_LIB（环境名不同时先 export PYTORCH_ENV=<名>）
+```
+
+## 构建与测试
+
+```bash
+cd csrc/kuccl      && ./build.sh     # 产物 build/libkuccl.so
+cd ../torch_kuccl  && ./build.sh     # 产物 kuccl_backend.so
+
+bash test.sh                          # 单机功能一键跑
+python tests/correctness.py --world-size 2
 ```
 
 ## 使用
 
 ```python
-import kuccl            # auto-register "kuccl" backend
+import kuccl                                  # auto-register "kuccl" backend
 import torch.distributed as dist
 
-dist.init_process_group("kuccl", rank=0, world_size=1)   # 或 "cpu:kuccl"
+dist.init_process_group("kuccl", rank=0, world_size=1)
 
 x = torch.ones(6)
-dist.all_reduce(x)                  # 走 kuccl
+dist.all_reduce(x)                            # 走 kuccl
 ```
 
-## 后端自动选择（无需配置）
+## 算子支持
 
-| 场景 | 自动选择的后端 | 判定依据 |
-|------|----------------|----------|
-| 单机（torchrun 单节点启动） | `kupl`（shm 快路径） | torchrun 注入的 `LOCAL_WORLD_SIZE == WORLD_SIZE` |
-| 跨节点 / 非(torchrun|单机) | `xuccl`（默认） | 其他一切情况 |
+| c10d 算子 | 实现 |
+|-----------|------|
+| all_reduce（含 coalesced 拼桶） | `kucclAllReduce` |
+| all_gather / all_gather_into_tensor | `kucclAllGather` |
+| broadcast | `kucclBroadcast` |
+| all_to_all（等长） | `kucclAllToAll` |
+| barrier | 1 字节 allreduce（`TORCH_KUCCL_BARRIER=store` 回退 TCPStore） |
+| 变长 all_to_all / reduce / send / recv 等 | 不支持（用 gloo） |
 
-优先级：**用户显式 `KUCCL_BACKEND_TYPE` > 自动选择 > 默认 xucg**。
-自动选中的 kupl 不可用时（未编入/初始化失败）自动回退 xucg 并 TORCH_WARN 提示。
-手动 A/B：`KUCCL_BACKEND_TYPE=kupl python tests/correctness.py ...`。
-（kupl 需 `KUPL_DIR` 指向安装前缀重新编译 libkuccl，见 ../kuccl/README.md。）
+## 环境变量
 
-## 算子支持矩阵
+| 变量 | 默认 | 说明 |
+|------|------|------|
+| `KUCCL_BACKEND_TYPE` | 自动 | `xucg`（默认）/ `kupl`（单机 shm） |
+| `KUCCL_TOPOLOGY` | 开 | 进程拓扑喂入（node_id / NUMA），`=0` 回退平铺 |
+| `KUCCL_LOG_LEVEL` | WARN | 库日志级别 |
+| `TORCH_KUCCL_ALLREDUCE_INPLACE` | 关 | allreduce 原地模式 |
+| `TORCH_KUCCL_FLUSH` | 关 | 每轮集合后 flush |
+| `TORCH_KUCCL_BARRIER` | 空 | `store` 时 barrier 走 TCPStore |
 
-| c10d 算子 | 实现 | 说明 |
-|-----------|------|------|
-| all_reduce / allreduce_coalesced | `kucclAllReduce` | 多 tensor 自动拼桶（1 轮通信） |
-| all_gather / all_gather_into_tensor | `kucclAllGather` | |
-| broadcast | `kucclBroadcast` | |
-| all_to_all（等长 split） | `kucclAllToAll` | 零拷贝直通 |
-| all_to_all（变长 split） | 不支持 | 显式报错；需要变长请用 gloo |
-| barrier | 1 字节 allreduce | `KUCCL_BARRIER=store` 回退 TCPStore |
-| reduce / reduce_scatter / gather / scatter | 未实现 | c10d 默认报错 |
-| send / recv | 不支持 | 公开面收敛为 4 个集合通信接口 |
+## 多节点测试
 
-异步语义：所有算子返回 `WorkKuccl`（真异步，V2.4）——`async_op=False` 时
-c10d 调 `work.wait()`；`async_op=True` 时 Work 交给用户，轮询循环在
-`wait()/isCompleted()` 内部。
+```bash
+cd benchmarks/communication
+
+# 1) 正确性门禁（先跑这个，通过才有性能意义）
+python compare_nodes.py --nnodes 8 --ppn 16 \
+    --ops all_reduce,all_gather,broadcast,all_to_all \
+    --gate --backends kuccl --local
+
+# 2) 性能对比（kuccl vs gloo，输出逐尺寸延迟表与验收判定）
+python compare_nodes.py --nnodes 8 --ppn 16 \
+    --ops all_reduce,all_gather,broadcast,all_to_all \
+    --trials 20 --maxsize 19 --local
+```
+
+性能轮自动先跑 kuccl 再跑 gloo，末尾输出逐尺寸对比表与判定
+（平均延迟提升 ≥30% 为达标）。节点清单与 TLS 在 `config/default.py`。
+
+查看每档消息实际选中的算法（含 node-aware 路由）：
+
+```bash
+python plan_map.py
+```
+
+其余参数（单算子、预热轮数、环境变量透传等）见 `--help`。
 
 ## 目录结构
 
 ```
 torch_kuccl/
-├── include/           backend.hpp（WorkKuccl/BackendKuccl）、oob.hpp
-├── csrc/              backend.cpp、oob.cpp（Store 版 OOB）
+├── csrc/ include/     适配层（BackendKuccl / OOB）
 ├── kuccl/             Python 包（预加载 HUCX/XUCG + auto-register）
-├── tests/             correctness.py（功能门禁）+ test_*.py（pytest 套件）
-├── examples/          benchmark.py（性能对比）、simple_allgather.py 等
-├── benchmarks/        DeepSpeed communication 套件（compare_run.py 等）
-├── multinode/         run_all.sh / run_node.sh 多节点编排
-├── test.sh            单机功能测试一键跑
-└── setup.py
+├── env.sh             conda + TORCH_LIB 激活
+├── build.sh / test.sh / setup.py
+├── tests/             correctness.py + pytest 套件
+└── benchmarks/        通信基准套件（compare_nodes.py 多节点编排）
 ```
-
-## 多节点
-
-```bash
-NNODES=2 PPN=2 bash multinode/run_all.sh     # 冒烟
-NNODES=8 PPN=16 bash multinode/run_all.sh    # 设计书验收口径
-BACKEND=gloo bash multinode/run_all.sh       # gloo 基线
-bash multinode/run_all.sh compare            # 30% 判定
-```
-
-TLS 策略（评审约定）：单机 `sm,self`；跨节点 `rc,self`（ud 备选 `ud,self`，
-跨节点配置不含 sm）——由 `run_node.sh` 按 NNODES 自动设置。

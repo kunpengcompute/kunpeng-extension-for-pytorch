@@ -38,15 +38,18 @@ namespace {
 const backend::Ops *g_active_backend = nullptr;
 } /* anonymous namespace */
 
-void set_active_backend(const backend::Ops *be) {
+void set_active_backend(const backend::Ops *be)
+{
     g_active_backend = be;
 }
-const backend::Ops *active_backend() {
+const backend::Ops *active_backend()
+{
     return g_active_backend;
 }
 
 /* OOB allgather 快捷封装：走 config.oob_allgather 回调 */
-int oob_exchange(const kucclConfig_t *cfg, const void *sendbuf, void *recvbuf, int count) {
+int oob_exchange(const kucclConfig_t *cfg, const void *sendbuf, void *recvbuf, int count)
+{
     if (!cfg || !cfg->oob_allgather)
         return -1;
     return cfg->oob_allgather(sendbuf, recvbuf, count, cfg->oob_ctx);
@@ -60,7 +63,8 @@ namespace {
 std::atomic<uint64_t> g_unique_id_counter{1};
 
 /* SplitMix64 — uniqueId 生成 */
-uint64_t kuccl_mix64(uint64_t x) {
+uint64_t kuccl_mix64(uint64_t x)
+{
     x += 0x9e3779b97f4a7c15ULL;
     x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
     x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
@@ -75,13 +79,13 @@ uint64_t kuccl_mix64(uint64_t x) {
  * ════════════════════════════════════════════════════════════*/
 extern "C" {
 
-KuCCL_API kucclResult_t kucclGetUniqueId(kucclUniqueId *uniqueId) {
+KuCCL_API kucclResult_t kucclGetUniqueId(kucclUniqueId *uniqueId)
+{
     if (!uniqueId)
         return KuCCL_FAIL;
 
     /* 用 timestamp + pid + counter 生成 128 字节唯一 ID */
-    const uint64_t now =
-        static_cast<uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count());
+    const uint64_t now = static_cast<uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count());
     const uint64_t pid = static_cast<uint64_t>(static_cast<uint32_t>(::getpid()));
     const uint64_t cnt = g_unique_id_counter.fetch_add(1, std::memory_order_relaxed);
 
@@ -104,7 +108,8 @@ KuCCL_API kucclResult_t kucclGetUniqueId(kucclUniqueId *uniqueId) {
 /* ════════════════════════════════════════════════════════════
  * 后端解析：config.backend > env KUCCL_BACKEND_TYPE > 默认 xucg
  * ════════════════════════════════════════════════════════════*/
-static const kuccl::backend::Ops *kuccl_resolve_backend(const kucclConfig_t *config, int rank) {
+static const kuccl::backend::Ops *kuccl_resolve_backend(const kucclConfig_t *config, int rank)
+{
     const char *name = nullptr;
     if (config != nullptr && config->backend != nullptr && config->backend[0] != '\0') {
         name = config->backend;
@@ -116,9 +121,8 @@ static const kuccl::backend::Ops *kuccl_resolve_backend(const kucclConfig_t *con
 
     const kuccl::backend::Ops *be = kuccl::backend::get(name);
     if (be == nullptr) {
-        kuccl::detail::err_record(
-            "kucclCommInitRankConfig: unknown backend '%s' (support: xucg/kupl)",
-            name != nullptr ? name : "(null)");
+        kuccl::detail::err_record("kucclCommInitRankConfig: unknown backend '%s' (support: xucg/kupl)",
+                                  name != nullptr ? name : "(null)");
         KuCCL_LOG_ERROR(rank, "KUCCL_BACKEND_TYPE='%s' 无法识别（支持: xucg；kupl 预留）",
                         name != nullptr ? name : "(null)");
         return nullptr;
@@ -126,8 +130,9 @@ static const kuccl::backend::Ops *kuccl_resolve_backend(const kucclConfig_t *con
     return be;
 }
 
-KuCCL_API kucclResult_t kucclCommInitRankConfig(kucclComm_t *comm, int nranks, kucclUniqueId commId,
-                                                int rank, kucclConfig_t *config) {
+KuCCL_API kucclResult_t kucclCommInitRankConfig(kucclComm_t *comm, int nranks, kucclUniqueId commId, int rank,
+                                                kucclConfig_t *config)
+{
     if (!comm || nranks <= 0 || rank < 0 || rank >= nranks)
         return KuCCL_FAIL;
     if (!config || !config->oob_allgather) {
@@ -174,7 +179,8 @@ KuCCL_API kucclResult_t kucclCommInitRankConfig(kucclComm_t *comm, int nranks, k
     return KuCCL_SUCCESS;
 }
 
-KuCCL_API kucclResult_t kucclCommDestroy(kucclComm_t comm) {
+KuCCL_API kucclResult_t kucclCommDestroy(kucclComm_t comm)
+{
     if (!comm)
         return KuCCL_SUCCESS;
     std::lock_guard<std::recursive_mutex> api_lock(kuccl::detail::g_api_lock);
@@ -194,7 +200,8 @@ KuCCL_API kucclResult_t kucclCommDestroy(kucclComm_t comm) {
  *   - 幂等、线程安全（atomic + lock）
  *   - 正常退出仍用 kucclCommDestroy（Abort 后也可再 Destroy 清资源）
  * ════════════════════════════════════════════════════════════*/
-KuCCL_API kucclResult_t kucclCommAbort(kucclComm_t comm) {
+KuCCL_API kucclResult_t kucclCommAbort(kucclComm_t comm)
+{
     if (!comm)
         return KuCCL_SUCCESS;
     std::lock_guard<std::recursive_mutex> api_lock(kuccl::detail::g_api_lock);
@@ -204,8 +211,8 @@ KuCCL_API kucclResult_t kucclCommAbort(kucclComm_t comm) {
         return KuCCL_SUCCESS;
 
     comm->aborted.store(1, std::memory_order_release);
-    kuccl::detail::err_record("comm aborted (rank=%d, nranks=%d): subsequent calls will fail",
-                              comm->rank, comm->nranks);
+    kuccl::detail::err_record("comm aborted (rank=%d, nranks=%d): subsequent calls will fail", comm->rank,
+                              comm->nranks);
     KuCCL_LOG_WARN(comm->rank, "kucclCommAbort: comm marked ABORTED");
 
     /* 在飞请求：尽力清理后端私有状态（非持久化的由持有方 Test 时
@@ -215,7 +222,8 @@ KuCCL_API kucclResult_t kucclCommAbort(kucclComm_t comm) {
     return KuCCL_SUCCESS;
 }
 
-KuCCL_API kucclResult_t kucclFlushComm(kucclComm_t comm) {
+KuCCL_API kucclResult_t kucclFlushComm(kucclComm_t comm)
+{
     if (!comm)
         return KuCCL_FAIL;
     if (comm->aborted.load(std::memory_order_acquire)) {
@@ -226,7 +234,8 @@ KuCCL_API kucclResult_t kucclFlushComm(kucclComm_t comm) {
 }
 
 KuCCL_API kucclResult_t kucclCommSplit(kucclComm_t comm, int color, int key, kucclComm_t *newcomm,
-                                       kucclConfig_t *config) {
+                                       kucclConfig_t *config)
+{
     if (!comm || !newcomm || !comm->has_oob)
         return KuCCL_FAIL;
 
@@ -249,8 +258,8 @@ KuCCL_API kucclResult_t kucclCommSplit(kucclComm_t comm, int color, int key, kuc
     const int ws = comm->nranks;
     std::vector<int32_t> colors(static_cast<std::size_t>(ws), -1);
     const int32_t my_color = static_cast<int32_t>(color);
-    if (kuccl::detail::oob_exchange(&comm->oob_config, &my_color, colors.data(),
-                                    static_cast<int>(sizeof(int32_t))) != 0) {
+    if (kuccl::detail::oob_exchange(&comm->oob_config, &my_color, colors.data(), static_cast<int>(sizeof(int32_t))) !=
+        0) {
         KuCCL_LOG_ERROR(comm->rank, "kucclCommSplit: OOB color exchange FAILED");
         return KuCCL_FAIL;
     }
@@ -284,8 +293,7 @@ KuCCL_API kucclResult_t kucclCommSplit(kucclComm_t comm, int color, int key, kuc
     kucclUniqueId dummy_id;
     kucclGetUniqueId(&dummy_id);
     kucclConfig_t cfg = (config != nullptr) ? *config : comm->oob_config;
-    return kucclCommInitRankConfig(newcomm, static_cast<int>(members.size()), dummy_id, new_rank,
-                                   &cfg);
+    return kucclCommInitRankConfig(newcomm, static_cast<int>(members.size()), dummy_id, new_rank, &cfg);
 }
 
 } /* extern "C" — 通信域接口结束 */
@@ -295,7 +303,8 @@ KuCCL_API kucclResult_t kucclCommSplit(kucclComm_t comm, int color, int key, kuc
  * ════════════════════════════════════════════════════════════*/
 namespace kuccl {
 
-void finalize() {
+void finalize()
+{
     const backend::Ops *be = detail::active_backend();
     if (be != nullptr) {
         be->process_finalize();

@@ -67,8 +67,8 @@ struct KuplReq {
 };
 
 /* OOB 适配：kuccl 回调（config.oob_allgather）→ kupl 签名 */
-int kupl_oob_allgather_cb(const void *sendbuf, void *recvbuf, int size, void *group,
-                          kupl_shm_datatype_t /*datatype*/) {
+int kupl_oob_allgather_cb(const void *sendbuf, void *recvbuf, int size, void *group, kupl_shm_datatype_t /*datatype*/)
+{
     auto *kc = static_cast<KuplComm *>(group);
     if (kc == nullptr || kc->owner == nullptr)
         return -1;
@@ -76,7 +76,8 @@ int kupl_oob_allgather_cb(const void *sendbuf, void *recvbuf, int size, void *gr
 }
 
 /* OOB barrier：用 1 字节 OOB allgather 模拟（语义：全员到齐） */
-int kupl_oob_barrier_cb(void *group) {
+int kupl_oob_barrier_cb(void *group)
+{
     auto *kc = static_cast<KuplComm *>(group);
     if (kc == nullptr || kc->owner == nullptr)
         return -1;
@@ -88,55 +89,59 @@ int kupl_oob_barrier_cb(void *group) {
 /* kucclDataType_t → kupl_shm_datatype_t
  * （Int32/Uint32 同映射 INT、Int64/Uint64 同映射 LONG：
  *   SUM/MIN/MAX 的按位语义在补码下一致；有符号性差异见 README 说明） */
-kupl_shm_datatype_t map_datatype(kucclDataType_t dt) {
+kupl_shm_datatype_t map_datatype(kucclDataType_t dt)
+{
     switch (dt) {
-    case kucclInt8:
-    case kucclUint8:
-        return KUPL_SHM_DATATYPE_CHAR;
-    case kucclInt32:
-    case kucclUint32:
-        return KUPL_SHM_DATATYPE_INT;
-    case kucclInt64:
-    case kucclUint64:
-        return KUPL_SHM_DATATYPE_LONG;
-    case kucclFloat:
-        return KUPL_SHM_DATATYPE_FLOAT;
-    case kucclDouble:
-        return KUPL_SHM_DATATYPE_DOUBLE;
+        case kucclInt8:
+        case kucclUint8:
+            return KUPL_SHM_DATATYPE_CHAR;
+        case kucclInt32:
+        case kucclUint32:
+            return KUPL_SHM_DATATYPE_INT;
+        case kucclInt64:
+        case kucclUint64:
+            return KUPL_SHM_DATATYPE_LONG;
+        case kucclFloat:
+            return KUPL_SHM_DATATYPE_FLOAT;
+        case kucclDouble:
+            return KUPL_SHM_DATATYPE_DOUBLE;
     }
     return KUPL_SHM_DATATYPE_CHAR;
 }
 
-kupl_shm_reduce_op_t map_redop(kucclRedOp_t op) {
+kupl_shm_reduce_op_t map_redop(kucclRedOp_t op)
+{
     switch (op) {
-    case kucclSum:
-        return KUPL_RD_ADD;
-    case kucclMin:
-        return KUPL_RD_MIN;
-    case kucclMax:
-        return KUPL_RD_MAX;
+        case kucclSum:
+            return KUPL_RD_ADD;
+        case kucclMin:
+            return KUPL_RD_MIN;
+        case kucclMax:
+            return KUPL_RD_MAX;
     }
     return KUPL_RD_ADD;
 }
 
-size_t kupl_dt_size(kucclDataType_t dt) {
+size_t kupl_dt_size(kucclDataType_t dt)
+{
     switch (dt) {
-    case kucclInt8:
-    case kucclUint8:
-        return 1;
-    case kucclInt32:
-    case kucclUint32:
-    case kucclFloat:
-        return 4;
-    case kucclInt64:
-    case kucclUint64:
-    case kucclDouble:
-        return 8;
+        case kucclInt8:
+        case kucclUint8:
+            return 1;
+        case kucclInt32:
+        case kucclUint32:
+        case kucclFloat:
+            return 4;
+        case kucclInt64:
+        case kucclUint64:
+        case kucclDouble:
+            return 8;
     }
     return 0;
 }
 
-size_t align_page(size_t n) {
+size_t align_page(size_t n)
+{
     const size_t page = 4096;
     return (n + page - 1) / page * page;
 }
@@ -144,7 +149,8 @@ size_t align_page(size_t n) {
 /* staging 窗口惰性增长（容量不足则重建为 2×need）。
  * 增长决策只依赖集合参数（count 全员一致），所有进程同步走到同一分支，
  * win_alloc/win_free 的合作式语义（全员同时调用）天然满足。 */
-kucclResult_t ensure_scratch(KuplComm *kc, size_t need_bytes) {
+kucclResult_t ensure_scratch(KuplComm *kc, size_t need_bytes)
+{
     const size_t half = align_page(need_bytes);
     if (kc->scratch != nullptr && kc->scratch_half >= half)
         return KuCCL_SUCCESS;
@@ -156,8 +162,7 @@ kucclResult_t ensure_scratch(KuplComm *kc, size_t need_bytes) {
     }
     void *base = nullptr;
     kupl_shm_win_h win = nullptr;
-    if (kupl_shm_win_alloc(half * 2, kc->comm, &base, &win) != 0 || base == nullptr ||
-        win == nullptr) {
+    if (kupl_shm_win_alloc(half * 2, kc->comm, &base, &win) != 0 || base == nullptr || win == nullptr) {
         detail::err_record("kupl: staging win_alloc(%zu) FAILED", half * 2);
         return KuCCL_FAIL;
     }
@@ -167,10 +172,12 @@ kucclResult_t ensure_scratch(KuplComm *kc, size_t need_bytes) {
     return KuCCL_SUCCESS;
 }
 
-inline void *scratch_send(KuplComm *kc) {
+inline void *scratch_send(KuplComm *kc)
+{
     return kc->scratch_base;
 }
-inline void *scratch_recv(KuplComm *kc) {
+inline void *scratch_recv(KuplComm *kc)
+{
     return static_cast<char *>(kc->scratch_base) + kc->scratch_half;
 }
 
@@ -180,14 +187,16 @@ inline void *scratch_recv(KuplComm *kc) {
  * 生命周期钩子
  * ════════════════════════════════════════════════════════════*/
 
-static kucclResult_t kupl_process_init(kucclComm * /*comm*/) {
+static kucclResult_t kupl_process_init(kucclComm * /*comm*/)
+{
     /* 无进程级前置：kupl_shm_init 由 comm_create / 各 init 惰性触发 */
     return KuCCL_SUCCESS;
 }
 
 static void kupl_process_finalize() {}
 
-static kucclResult_t kupl_group_init(kucclComm *comm) {
+static kucclResult_t kupl_group_init(kucclComm *comm)
+{
     const int rank = comm->rank;
 
     auto *kc = new (std::nothrow) KuplComm();
@@ -204,8 +213,7 @@ static kucclResult_t kupl_group_init(kucclComm *comm) {
 
     /* comm_create 内部惰性做 kupl_shm_init，并通过注入的 OOB 回调
      * 收集组员信息（group cookie = kc） */
-    if (kupl_shm_comm_create(comm->nranks, rank, static_cast<int>(::getpid()), &cbs, kc,
-                             &kc->comm) != 0 ||
+    if (kupl_shm_comm_create(comm->nranks, rank, static_cast<int>(::getpid()), &cbs, kc, &kc->comm) != 0 ||
         kc->comm == nullptr) {
         detail::err_record("kupl: kupl_shm_comm_create FAILED");
         KuCCL_LOG_ERROR(rank, "kupl_shm_comm_create FAILED");
@@ -218,7 +226,8 @@ static kucclResult_t kupl_group_init(kucclComm *comm) {
     return KuCCL_SUCCESS;
 }
 
-static void kupl_group_fini(kucclComm *comm) {
+static void kupl_group_fini(kucclComm *comm)
+{
     auto *kc = static_cast<KuplComm *>(comm->be_ctx);
     if (kc == nullptr)
         return;
@@ -238,8 +247,8 @@ static void kupl_group_fini(kucclComm *comm) {
  * 集合算子：参数准备 → staging → kupl request（start 同步驱动）
  * ════════════════════════════════════════════════════════════*/
 
-static kucclResult_t kupl_coll_start(kucclComm *comm, CollOp op, const CollParams *p,
-                                     kucclRequest *req) {
+static kucclResult_t kupl_coll_start(kucclComm *comm, CollOp op, const CollParams *p, kucclRequest *req)
+{
     const int rank = comm->rank;
     auto *kc = static_cast<KuplComm *>(comm->be_ctx);
 
@@ -253,136 +262,128 @@ static kucclResult_t kupl_coll_start(kucclComm *comm, CollOp op, const CollParam
     const size_t dt_size = kupl_dt_size(p->datatype);
 
     switch (op) {
-    case CollOp::AllReduce: {
-        const size_t bytes = p->count * dt_size;
-        if (bytes == 0 || bytes > static_cast<size_t>(INT32_MAX) ||
-            ensure_scratch(kc, bytes) != KuCCL_SUCCESS) {
-            detail::err_record("kupl allreduce: staging FAILED");
-            delete priv;
-            return KuCCL_FAIL;
+        case CollOp::AllReduce: {
+            const size_t bytes = p->count * dt_size;
+            if (bytes == 0 || bytes > static_cast<size_t>(INT32_MAX) || ensure_scratch(kc, bytes) != KuCCL_SUCCESS) {
+                detail::err_record("kupl allreduce: staging FAILED");
+                delete priv;
+                return KuCCL_FAIL;
+            }
+            void *send_r = scratch_send(kc);
+            void *recv_r = scratch_recv(kc);
+            std::memcpy(send_r, p->sendbuff, bytes);
+            if (kupl_shm_allreduce_init(send_r, recv_r, static_cast<int>(p->count), map_datatype(p->datatype),
+                                        map_redop(p->redop), kc->comm, &kreq) != 0) {
+                detail::err_record("kupl: allreduce_init FAILED");
+                delete priv;
+                return KuCCL_FAIL;
+            }
+            if (kupl_shm_request_start(kreq) != 0) {
+                detail::err_record("kupl: allreduce start FAILED");
+                kupl_shm_request_free(kreq);
+                delete priv;
+                return KuCCL_FAIL;
+            }
+            priv->user_dst = p->recvbuff;
+            priv->win_src = recv_r;
+            priv->copy_bytes = bytes;
+            break;
         }
-        void *send_r = scratch_send(kc);
-        void *recv_r = scratch_recv(kc);
-        std::memcpy(send_r, p->sendbuff, bytes);
-        if (kupl_shm_allreduce_init(send_r, recv_r, static_cast<int>(p->count),
-                                    map_datatype(p->datatype), map_redop(p->redop), kc->comm,
-                                    &kreq) != 0) {
-            detail::err_record("kupl: allreduce_init FAILED");
-            delete priv;
-            return KuCCL_FAIL;
-        }
-        if (kupl_shm_request_start(kreq) != 0) {
-            detail::err_record("kupl: allreduce start FAILED");
-            kupl_shm_request_free(kreq);
-            delete priv;
-            return KuCCL_FAIL;
-        }
-        priv->user_dst = p->recvbuff;
-        priv->win_src = recv_r;
-        priv->copy_bytes = bytes;
-        break;
-    }
-    case CollOp::Broadcast: {
-        const size_t bytes = p->count * dt_size;
-        if (bytes == 0 || bytes > static_cast<size_t>(INT32_MAX) ||
-            ensure_scratch(kc, bytes) != KuCCL_SUCCESS) {
-            detail::err_record("kupl bcast: staging FAILED");
-            delete priv;
-            return KuCCL_FAIL;
-        }
-        void *buf_r = scratch_recv(kc);
-        /* root 先拷入；bcast_init 内部对 buffer 所在窗口做 fence，
+        case CollOp::Broadcast: {
+            const size_t bytes = p->count * dt_size;
+            if (bytes == 0 || bytes > static_cast<size_t>(INT32_MAX) || ensure_scratch(kc, bytes) != KuCCL_SUCCESS) {
+                detail::err_record("kupl bcast: staging FAILED");
+                delete priv;
+                return KuCCL_FAIL;
+            }
+            void *buf_r = scratch_recv(kc);
+            /* root 先拷入；bcast_init 内部对 buffer 所在窗口做 fence，
          * 保证 root 拷入 happens-before 各 rank 的算法读取 */
-        if (comm->rank == p->root) {
-            std::memcpy(buf_r, p->sendbuff, bytes);
+            if (comm->rank == p->root) {
+                std::memcpy(buf_r, p->sendbuff, bytes);
+            }
+            if (kupl_shm_bcast_init(buf_r, static_cast<int>(p->count), map_datatype(p->datatype), p->root, kc->comm,
+                                    &kreq) != 0) {
+                detail::err_record("kupl: bcast_init FAILED");
+                delete priv;
+                return KuCCL_FAIL;
+            }
+            if (kupl_shm_request_start(kreq) != 0) {
+                detail::err_record("kupl: bcast start FAILED");
+                kupl_shm_request_free(kreq);
+                delete priv;
+                return KuCCL_FAIL;
+            }
+            priv->user_dst = p->recvbuff;
+            priv->win_src = buf_r;
+            priv->copy_bytes = bytes;
+            break;
         }
-        if (kupl_shm_bcast_init(buf_r, static_cast<int>(p->count), map_datatype(p->datatype),
-                                p->root, kc->comm, &kreq) != 0) {
-            detail::err_record("kupl: bcast_init FAILED");
-            delete priv;
-            return KuCCL_FAIL;
+        case CollOp::AllToAll: {
+            const size_t per_rank = p->count * dt_size;
+            const size_t total = per_rank * static_cast<size_t>(comm->nranks);
+            if (per_rank == 0 || total > static_cast<size_t>(INT32_MAX) || ensure_scratch(kc, total) != KuCCL_SUCCESS) {
+                detail::err_record("kupl alltoall: staging FAILED");
+                delete priv;
+                return KuCCL_FAIL;
+            }
+            void *send_r = scratch_send(kc);
+            void *recv_r = scratch_recv(kc);
+            std::memcpy(send_r, p->sendbuff, total);
+            if (kupl_shm_alltoall_init(send_r, static_cast<int>(p->count), map_datatype(p->datatype), recv_r,
+                                       static_cast<int>(p->count), map_datatype(p->datatype), kc->comm, &kreq) != 0) {
+                detail::err_record("kupl: alltoall_init FAILED");
+                delete priv;
+                return KuCCL_FAIL;
+            }
+            if (kupl_shm_request_start(kreq) != 0) {
+                detail::err_record("kupl: alltoall start FAILED");
+                kupl_shm_request_free(kreq);
+                delete priv;
+                return KuCCL_FAIL;
+            }
+            priv->user_dst = p->recvbuff;
+            priv->win_src = recv_r;
+            priv->copy_bytes = total;
+            break;
         }
-        if (kupl_shm_request_start(kreq) != 0) {
-            detail::err_record("kupl: bcast start FAILED");
-            kupl_shm_request_free(kreq);
-            delete priv;
-            return KuCCL_FAIL;
-        }
-        priv->user_dst = p->recvbuff;
-        priv->win_src = buf_r;
-        priv->copy_bytes = bytes;
-        break;
-    }
-    case CollOp::AllToAll: {
-        const size_t per_rank = p->count * dt_size;
-        const size_t total = per_rank * static_cast<size_t>(comm->nranks);
-        if (per_rank == 0 || total > static_cast<size_t>(INT32_MAX) ||
-            ensure_scratch(kc, total) != KuCCL_SUCCESS) {
-            detail::err_record("kupl alltoall: staging FAILED");
-            delete priv;
-            return KuCCL_FAIL;
-        }
-        void *send_r = scratch_send(kc);
-        void *recv_r = scratch_recv(kc);
-        std::memcpy(send_r, p->sendbuff, total);
-        if (kupl_shm_alltoall_init(send_r, static_cast<int>(p->count), map_datatype(p->datatype),
-                                   recv_r, static_cast<int>(p->count), map_datatype(p->datatype),
-                                   kc->comm, &kreq) != 0) {
-            detail::err_record("kupl: alltoall_init FAILED");
-            delete priv;
-            return KuCCL_FAIL;
-        }
-        if (kupl_shm_request_start(kreq) != 0) {
-            detail::err_record("kupl: alltoall start FAILED");
-            kupl_shm_request_free(kreq);
-            delete priv;
-            return KuCCL_FAIL;
-        }
-        priv->user_dst = p->recvbuff;
-        priv->win_src = recv_r;
-        priv->copy_bytes = total;
-        break;
-    }
-    case CollOp::AllGather: {
-        /* 等长 alltoall 转换：每槽填自己的块（CHAR 按字节计数）。
+        case CollOp::AllGather: {
+            /* 等长 alltoall 转换：每槽填自己的块（CHAR 按字节计数）。
          * 发送总量 = 接收总量 = nranks × chunk，与 allgather 一次
          * 线性搬运的流量同级 */
-        const size_t chunk = p->count * dt_size;
-        const size_t total = chunk * static_cast<size_t>(comm->nranks);
-        if (chunk == 0 || total > static_cast<size_t>(INT32_MAX) ||
-            ensure_scratch(kc, total) != KuCCL_SUCCESS) {
-            detail::err_record("kupl allgather: staging FAILED");
+            const size_t chunk = p->count * dt_size;
+            const size_t total = chunk * static_cast<size_t>(comm->nranks);
+            if (chunk == 0 || total > static_cast<size_t>(INT32_MAX) || ensure_scratch(kc, total) != KuCCL_SUCCESS) {
+                detail::err_record("kupl allgather: staging FAILED");
+                delete priv;
+                return KuCCL_FAIL;
+            }
+            void *send_r = scratch_send(kc);
+            void *recv_r = scratch_recv(kc);
+            for (int i = 0; i < comm->nranks; ++i) {
+                std::memcpy(static_cast<char *>(send_r) + static_cast<size_t>(i) * chunk, p->sendbuff, chunk);
+            }
+            if (kupl_shm_alltoall_init(send_r, static_cast<int>(chunk), KUPL_SHM_DATATYPE_CHAR, recv_r,
+                                       static_cast<int>(chunk), KUPL_SHM_DATATYPE_CHAR, kc->comm, &kreq) != 0) {
+                detail::err_record("kupl: allgather(alltoall) init FAILED");
+                delete priv;
+                return KuCCL_FAIL;
+            }
+            if (kupl_shm_request_start(kreq) != 0) {
+                detail::err_record("kupl: allgather start FAILED");
+                kupl_shm_request_free(kreq);
+                delete priv;
+                return KuCCL_FAIL;
+            }
+            priv->user_dst = p->recvbuff;
+            priv->win_src = recv_r;
+            priv->copy_bytes = total;
+            break;
+        }
+        default:
+            detail::err_record("kupl: unsupported coll op %d", static_cast<int>(op));
             delete priv;
             return KuCCL_FAIL;
-        }
-        void *send_r = scratch_send(kc);
-        void *recv_r = scratch_recv(kc);
-        for (int i = 0; i < comm->nranks; ++i) {
-            std::memcpy(static_cast<char *>(send_r) + static_cast<size_t>(i) * chunk, p->sendbuff,
-                        chunk);
-        }
-        if (kupl_shm_alltoall_init(send_r, static_cast<int>(chunk), KUPL_SHM_DATATYPE_CHAR, recv_r,
-                                   static_cast<int>(chunk), KUPL_SHM_DATATYPE_CHAR, kc->comm,
-                                   &kreq) != 0) {
-            detail::err_record("kupl: allgather(alltoall) init FAILED");
-            delete priv;
-            return KuCCL_FAIL;
-        }
-        if (kupl_shm_request_start(kreq) != 0) {
-            detail::err_record("kupl: allgather start FAILED");
-            kupl_shm_request_free(kreq);
-            delete priv;
-            return KuCCL_FAIL;
-        }
-        priv->user_dst = p->recvbuff;
-        priv->win_src = recv_r;
-        priv->copy_bytes = total;
-        break;
-    }
-    default:
-        detail::err_record("kupl: unsupported coll op %d", static_cast<int>(op));
-        delete priv;
-        return KuCCL_FAIL;
     }
 
     priv->req = kreq;
@@ -394,7 +395,8 @@ static kucclResult_t kupl_coll_start(kucclComm *comm, CollOp op, const CollParam
  * 请求推进：kupl start 同步驱动，到这里数据已就绪——拷回 + free
  * ════════════════════════════════════════════════════════════*/
 
-static kucclResult_t kupl_req_test(kucclRequest *req, int *flag, kucclStatus_t *status) {
+static kucclResult_t kupl_req_test(kucclRequest *req, int *flag, kucclStatus_t *status)
+{
     auto *priv = static_cast<KuplReq *>(req->priv);
     if (priv == nullptr) {
         *flag = 1;
@@ -414,7 +416,8 @@ static kucclResult_t kupl_req_test(kucclRequest *req, int *flag, kucclStatus_t *
     return KuCCL_SUCCESS;
 }
 
-static void kupl_req_cancel(kucclRequest *req) {
+static void kupl_req_cancel(kucclRequest *req)
+{
     auto *priv = static_cast<KuplReq *>(req->priv);
     if (priv == nullptr)
         return;
@@ -427,16 +430,17 @@ static void kupl_req_cancel(kucclRequest *req) {
 
 static void kupl_comm_purge(kucclComm * /*comm*/) {}
 
-static kucclResult_t kupl_flush(kucclComm * /*comm*/) {
+static kucclResult_t kupl_flush(kucclComm * /*comm*/)
+{
     /* shm 数据面同步完成，无在飞操作 */
     return KuCCL_SUCCESS;
 }
 
-const Ops *kupl_ops() {
+const Ops *kupl_ops()
+{
     static const Ops ops = {
-        "kupl",           &kupl_process_init, &kupl_process_finalize, &kupl_group_init,
-        &kupl_group_fini, &kupl_coll_start,   &kupl_req_test,         &kupl_req_cancel,
-        &kupl_comm_purge, &kupl_flush,
+        "kupl",           &kupl_process_init, &kupl_process_finalize, &kupl_group_init, &kupl_group_fini,
+        &kupl_coll_start, &kupl_req_test,     &kupl_req_cancel,       &kupl_comm_purge, &kupl_flush,
     };
     return &ops;
 }
@@ -451,14 +455,16 @@ namespace backend {
 
 namespace {
 
-kucclResult_t kupl_unavailable(const char *what) {
+kucclResult_t kupl_unavailable(const char *what)
+{
     detail::err_record("kupl backend: %s unavailable (built without KuCCL_HAVE_KUPL; "
                        "set KUPL_DIR to a KUPL install prefix and rebuild)",
                        what);
     return KuCCL_FAIL;
 }
 
-kucclResult_t kupl_process_init(kucclComm *comm) {
+kucclResult_t kupl_process_init(kucclComm *comm)
+{
     KuCCL_LOG_ERROR(comm->rank, "KUCCL_BACKEND_TYPE=kupl: 本构建未链接 KUPL"
                                 "（需 KUPL_DIR 指向 kupl 安装前缀后重新编译），"
                                 "当前可用后端：xucg。");
@@ -467,16 +473,19 @@ kucclResult_t kupl_process_init(kucclComm *comm) {
 
 void kupl_process_finalize() {}
 
-kucclResult_t kupl_group_init(kucclComm *) {
+kucclResult_t kupl_group_init(kucclComm *)
+{
     return kupl_unavailable("group_init");
 }
 void kupl_group_fini(kucclComm *) {}
 
-kucclResult_t kupl_coll_start(kucclComm *, CollOp, const CollParams *, kucclRequest *) {
+kucclResult_t kupl_coll_start(kucclComm *, CollOp, const CollParams *, kucclRequest *)
+{
     return kupl_unavailable("collective start");
 }
 
-kucclResult_t kupl_req_test(kucclRequest *, int *, kucclStatus_t *) {
+kucclResult_t kupl_req_test(kucclRequest *, int *, kucclStatus_t *)
+{
     return kupl_unavailable("request test");
 }
 
@@ -484,19 +493,20 @@ void kupl_req_cancel(kucclRequest *) {}
 
 void kupl_comm_purge(kucclComm *) {}
 
-kucclResult_t kupl_flush(kucclComm *) {
+kucclResult_t kupl_flush(kucclComm *)
+{
     return kupl_unavailable("flush");
 }
 
 const Ops g_kupl_ops = {
-    "kupl",           &kupl_process_init, &kupl_process_finalize, &kupl_group_init,
-    &kupl_group_fini, &kupl_coll_start,   &kupl_req_test,         &kupl_req_cancel,
-    &kupl_comm_purge, &kupl_flush,
+    "kupl",           &kupl_process_init, &kupl_process_finalize, &kupl_group_init, &kupl_group_fini,
+    &kupl_coll_start, &kupl_req_test,     &kupl_req_cancel,       &kupl_comm_purge, &kupl_flush,
 };
 
 } /* anonymous namespace */
 
-const Ops *kupl_ops() {
+const Ops *kupl_ops()
+{
     return &g_kupl_ops;
 }
 

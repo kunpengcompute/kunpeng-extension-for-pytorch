@@ -20,8 +20,8 @@ namespace kuccl {
  *   rank-0 聚合后广播 packed result，其余 rank 等待获取。
  *   recvbuf = world_size * msglen 字节，slot[i] = rank-i 数据。
  *   prefix 用于多子组隔离（由调用方传入唯一前缀）。 */
-void oob_allgather(c10d::Store *store, const void *sendbuf, void *recvbuf, int rank, int world_size,
-                   std::size_t msglen, const std::string &prefix = "");
+void oob_allgather(c10d::Store *store, const void *sendbuf, void *recvbuf, int rank, int world_size, std::size_t msglen,
+                   const std::string &prefix = "");
 
 /* 基于 Store key 的全局屏障。
  * 在销毁 TCPStore server 前调用，防止 server 先析构导致 peer 连接断开。 */

@@ -35,7 +35,10 @@ extern "C" {
  * 失败的具体原因走两条文本通道：
  *   kucclGetLastError()（kuccl/UCG 两层的报错原文，含 UCG st 码）
  *   KUCCL_LOG_* 日志行                                                  */
-typedef enum { KuCCL_SUCCESS = 0, KuCCL_FAIL = -1 } kucclResult_t;
+typedef enum {
+    KuCCL_SUCCESS = 0,
+    KuCCL_FAIL = -1
+} kucclResult_t;
 
 /* ── 通信域状态（kucclTest 返回）──────────────────────── */
 typedef enum {
@@ -72,7 +75,11 @@ typedef enum {
 } kucclDataType_t;
 
 /* ── 归约操作 ───────────────────────────────────────────── */
-typedef enum { kucclSum = 0, kucclMin = 1, kucclMax = 2 } kucclRedOp_t;
+typedef enum {
+    kucclSum = 0,
+    kucclMin = 1,
+    kucclMax = 2
+} kucclRedOp_t;
 
 /* ════════════════════════════════════════════════════════════
  * OOB 回调签名 —— kuccl 库唯一的引导通道（留给调用方注入）

@@ -59,8 +59,8 @@ KuCCL_API kucclResult_t kucclGetUniqueId(kucclUniqueId *uniqueId);
  *   rank    - 当前进程 ID
  *   config  - OOB 回调配置（oob_allgather 必填，oob_ctx 原样传回回调；
  *             backend 可选后端名，NULL = 默认 xucg） */
-KuCCL_API kucclResult_t kucclCommInitRankConfig(kucclComm_t *comm, int nranks, kucclUniqueId commId,
-                                                int rank, kucclConfig_t *config);
+KuCCL_API kucclResult_t kucclCommInitRankConfig(kucclComm_t *comm, int nranks, kucclUniqueId commId, int rank,
+                                                kucclConfig_t *config);
 
 /* 销毁 kuccl 通信域。 */
 KuCCL_API kucclResult_t kucclCommDestroy(kucclComm_t comm);
@@ -114,30 +114,26 @@ KuCCL_API kucclResult_t kucclFlushComm(kucclComm_t comm);
  *   AllReduce  : 真实 dtype + 元素数（归约必须知道元素类型）
  *   其余算子   : 默认内部转 UINT8 + 字节数传后端（KUCCL_VDT=elem
  *                可切元素语义）。两种语义在 UCG 侧的 plan 选择不同。 */
-KuCCL_API kucclResult_t kucclAllGather(const void *sendbuff, void *recvbuff, size_t sendcount,
-                                       kucclDataType_t datatype, kucclComm_t comm,
-                                       kucclRequest_t *request);
+KuCCL_API kucclResult_t kucclAllGather(const void *sendbuff, void *recvbuff, size_t sendcount, kucclDataType_t datatype,
+                                       kucclComm_t comm, kucclRequest_t *request);
 
 /* AllReduce：所有进程的数据按 reduction_op 归约，结果写入 recvbuff。
  *   recvbuff 可与 sendbuff 相同（原地归约）。
  *
  *   count 是元素个数（不是字节数）。
  *   内部必须用真实 dtype（不能用 UINT8），否则逐字节归约出错。 */
-KuCCL_API kucclResult_t kucclAllReduce(void *sendbuff, void *recvbuff, size_t count,
-                                       kucclDataType_t datatype, kucclRedOp_t reduction_op,
-                                       kucclComm_t comm, kucclRequest_t *request);
+KuCCL_API kucclResult_t kucclAllReduce(void *sendbuff, void *recvbuff, size_t count, kucclDataType_t datatype,
+                                       kucclRedOp_t reduction_op, kucclComm_t comm, kucclRequest_t *request);
 
 /* Broadcast：root 进程的数据广播给所有进程。
  *   root 的 sendbuff 为数据源；recvbuff 为收发缓冲（root 处先拷贝） */
-KuCCL_API kucclResult_t kucclBroadcast(const void *sendbuff, void *recvbuff, size_t count,
-                                       kucclDataType_t datatype, int root, kucclComm_t comm,
-                                       kucclRequest_t *request);
+KuCCL_API kucclResult_t kucclBroadcast(const void *sendbuff, void *recvbuff, size_t count, kucclDataType_t datatype,
+                                       int root, kucclComm_t comm, kucclRequest_t *request);
 
 /* AllToAll：所有进程之间等长全交换。
  *   sendbuff/recvbuff 需 nranks * count 个元素 */
-KuCCL_API kucclResult_t kucclAllToAll(const void *sendbuff, void *recvbuff, size_t count,
-                                      kucclDataType_t datatype, kucclComm_t comm,
-                                      kucclRequest_t *request);
+KuCCL_API kucclResult_t kucclAllToAll(const void *sendbuff, void *recvbuff, size_t count, kucclDataType_t datatype,
+                                      kucclComm_t comm, kucclRequest_t *request);
 
 /* ════════════════════════════════════════════════════════════
  * 异步请求测试

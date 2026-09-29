@@ -49,32 +49,32 @@ void log_write(LogLevel lv, int rank, const char *file, int line, const char *fm
 } /* namespace detail */
 } /* namespace kuccl */
 
-#define KuCCL_LOG_ERROR(rank, ...)                                                                 \
-    do {                                                                                           \
-        using kuccl::detail::LogLevel;                                                             \
-        if (kuccl::detail::log_level() >= LogLevel::ERROR)                                         \
-            kuccl::detail::log_write(LogLevel::ERROR, (rank), __FILE__, __LINE__, __VA_ARGS__);    \
+#define KuCCL_LOG_ERROR(rank, ...)                                                              \
+    do {                                                                                        \
+        using kuccl::detail::LogLevel;                                                          \
+        if (kuccl::detail::log_level() >= LogLevel::ERROR)                                      \
+            kuccl::detail::log_write(LogLevel::ERROR, (rank), __FILE__, __LINE__, __VA_ARGS__); \
     } while (0)
 
-#define KuCCL_LOG_WARN(rank, ...)                                                                  \
-    do {                                                                                           \
-        using kuccl::detail::LogLevel;                                                             \
-        if (kuccl::detail::log_level() >= LogLevel::WARN)                                          \
-            kuccl::detail::log_write(LogLevel::WARN, (rank), __FILE__, __LINE__, __VA_ARGS__);     \
+#define KuCCL_LOG_WARN(rank, ...)                                                              \
+    do {                                                                                       \
+        using kuccl::detail::LogLevel;                                                         \
+        if (kuccl::detail::log_level() >= LogLevel::WARN)                                      \
+            kuccl::detail::log_write(LogLevel::WARN, (rank), __FILE__, __LINE__, __VA_ARGS__); \
     } while (0)
 
-#define KuCCL_LOG_INFO(rank, ...)                                                                  \
-    do {                                                                                           \
-        using kuccl::detail::LogLevel;                                                             \
-        if (kuccl::detail::log_level() >= LogLevel::INFO)                                          \
-            kuccl::detail::log_write(LogLevel::INFO, (rank), __FILE__, __LINE__, __VA_ARGS__);     \
+#define KuCCL_LOG_INFO(rank, ...)                                                              \
+    do {                                                                                       \
+        using kuccl::detail::LogLevel;                                                         \
+        if (kuccl::detail::log_level() >= LogLevel::INFO)                                      \
+            kuccl::detail::log_write(LogLevel::INFO, (rank), __FILE__, __LINE__, __VA_ARGS__); \
     } while (0)
 
-#define KuCCL_LOG_TRACE(rank, ...)                                                                 \
-    do {                                                                                           \
-        using kuccl::detail::LogLevel;                                                             \
-        if (kuccl::detail::log_level() >= LogLevel::TRACE)                                         \
-            kuccl::detail::log_write(LogLevel::TRACE, (rank), __FILE__, __LINE__, __VA_ARGS__);    \
+#define KuCCL_LOG_TRACE(rank, ...)                                                              \
+    do {                                                                                        \
+        using kuccl::detail::LogLevel;                                                          \
+        if (kuccl::detail::log_level() >= LogLevel::TRACE)                                      \
+            kuccl::detail::log_write(LogLevel::TRACE, (rank), __FILE__, __LINE__, __VA_ARGS__); \
     } while (0)
 
 #endif /* KuCCL_LOG_HPP_ */
