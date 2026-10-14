@@ -1,5 +1,5 @@
 minimum_pre_commit_version: 4.0.0
-exclude: ^LICENSE|^README.md|^.clang-format|^.pre-commit-config.yaml|^requirements_install.md|^thirdparty/|\.(html|csv|svg)$
+exclude: ^LICENSE|^README.md|^.clang-format|^.pre-commit-config.yaml|^requirements_install.md|^thirdparty/|^pyproject.toml|\.(html|csv|svg)$
 
 default_stages: [pre-commit]
 ci:
@@ -8,7 +8,7 @@ ci:
 
 repos:
   # pre-commit 基础检查
-  - repo: https://github.com/pre-commit/pre-commit-hooks
+  - repo: https://gitcode.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
       - id: trailing-whitespace
@@ -28,3 +28,13 @@ repos:
         files: \.(c|h|cpp|hpp|cc|hh|cxx|hxx)$
         types_or: [c, c++]
         exclude: ^build/|^test/|^third_party/
+
+  # Python 检查与格式化
+  - repo: https://gitcode.com/gh_mirrors/ru/ruff-pre-commit
+    rev: v0.14.14
+    hooks:
+      - id: ruff-check
+        args: [--output-format=github, --fix]
+        types: [python]
+      - id: ruff-format
+        types: [python]
