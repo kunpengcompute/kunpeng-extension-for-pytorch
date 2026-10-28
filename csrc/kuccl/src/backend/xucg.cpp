@@ -1,19 +1,14 @@
 /*
  * xucg 后端 —— 基于 UCG 公有接口的集合通信实现（默认后端）
  *
- * 后端边界（见 backend.hpp 的约定）：
- *   - 集合请求：ucg_request_*_init → ucg_request_start → ucg_request_test
- *     推进用 ucg_progress（UCG 公有接口），状态码只判 UCG_OK / UCG_INPROGRESS；
- *   - UCP 资源层：ucg 的编程模型要求调用方注入 ucp context/worker/ep
- *     （ucg_global_init 的 oob_resource 回调），因此 ucp_init/ucp_ep_create
- *     等资源调用封闭在本文件内，对 kuccl 骨架（coll.cpp/comm.cpp）不可见。
+ * 集合请求只走 UCG 公有接口（状态码只判 UCG_OK / UCG_INPROGRESS）；
+ * UCP 作为 ucg 编程模型要求的注入资源层，调用封闭在本文件内。
  *
  * 核心机制：
  *   - 进程级单例（UCP/UCG context + 全局地址表）
  *   - 两阶段变长地址 allgather
- *   - 进程拓扑：OOB 交换主机哈希 → 节点表 + PPN，经 get_proc_info 的
- *     location.node_id 喂 UCG（节点感知算法与策略表分档的唯一拓扑入口；
- *     交换失败全组一致降级为平铺模型——UCG 要求全组同报或同不报）
+ *   - 进程拓扑：OOB 交换主机哈希 → 节点表 + PPN，经 get_proc_info 喂 UCG
+ *     （交换失败全组一致降级平铺——UCG 要求全组同报或同不报）
  *   - FNV-1a group_id 哈希 + instance_token 防撞
  *   - UCG 回调（oob_cb / get_ucp_ep / get_ucp_worker/context / get_proc_info）
  */
@@ -461,12 +456,10 @@ kucclResult_t xucg_process_init_once(kucclComm *world_comm)
         return KuCCL_FAIL;
 
     /* (d2) 进程拓扑（KUCCL_TOPOLOGY=0 可关，默认开）：主机名哈希 OOB 交换。
-     * 不做任何"按 rank 推算节点"的假设（一机多作业 / 进程数不均 / 换 launcher
-     * 都会使 rank/ppn 推算出错，猜错比不喂更糟——UCG 会按错误边界建组）；
-     * LOCAL_WORLD_SIZE 只作交叉校验告警，不作数据源。
-     * UCG 要求拓扑全组同报或同不报（其 locations[] 为 malloc 分配、仅对
-     * 上报者赋值，部分上报的未初始化 node_id 会被当数组下标用导致越界写），
-     * 故加一轮 1 字节全组表决：任一 rank 交换失败 → 全组统一降级平铺。 */
+     * 不按 rank 推算节点（一机多作业/进程数不均都会猜错，UCG 会按错误
+     * 边界建组）；LOCAL_WORLD_SIZE 只作交叉校验告警。
+     * UCG 的 locations[] 仅对上报者赋值，部分上报会越界写——须全组同报
+     * 或同不报：任一 rank 交换失败 → 1 字节全组表决 → 统一降级平铺。 */
     g_xucg.topology_ok = false;
     if (topology_enabled()) {
         const uint64_t my_hash = xucg_host_hash();
@@ -811,18 +804,11 @@ inline double prof_us_since(const std::chrono::steady_clock::time_point &t0)
     return std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - t0).count();
 }
 
-/* ════════════════════════════════════════════════════════════
- * KUCCL_PERSISTENT_REQ —— 持久化请求（默认关）
- *
- * ★ plan 一次构建终身复用，热路径零 init；ucg.h 明确支持
- *   request 完成后再次 start。
- *
- * 机制：同 key（算子/dtype/count/缓冲指针/root/comm）的集合调用，
- *   完成后不销毁 ucg_request，下次直接 ucg_request_start 复用。
- *
- * AllGather/AllToAll 的 counts/displs 随单次请求释放，
- * 请求入池复用后指针失效。故仅 AllReduce / Broadcast 入池。
- * ════════════════════════════════════════════════════════════*/
+/* KUCCL_PERSISTENT_REQ —— 持久化请求（默认关）。
+ * plan 一次构建终身复用，热路径零 init（ucg.h 支持完成后再次 start）。
+ * 同 key（算子/dtype/count/缓冲指针/root/comm）的请求完成后不销毁，
+ * 下次直接 start 复用。AllGather/AllToAll 的 counts/displs 随单次请求
+ * 释放，入池后指针失效——故仅 AllReduce / Broadcast 入池。 */
 
 enum {
     XUCG_PERSIST_AR = 1,

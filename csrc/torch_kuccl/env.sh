@@ -13,7 +13,7 @@
 #   source ./env.sh --check    # 激活 + 自检
 
 # PyTorch 所在 conda 环境（中性名；勿用项目前缀——本脚本不属于任何项目）
-export PYTORCH_ENV=${PYTORCH_ENV:-kuccl291}
+export PYTORCH_ENV=${PYTORCH_ENV:-kuccl}
 
 CONDA_SH_CANDIDATES=(
     "/root/pacific_ext/huawei/z00515076/anaconda3/etc/profile.d/conda.sh"

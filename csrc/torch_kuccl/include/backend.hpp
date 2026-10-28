@@ -31,15 +31,9 @@
 namespace c10d {
 
 /* ── WorkKuccl（异步 Work：持有在飞的 kucclRequest）────────
- *
- * 对齐 c10d 的异步语义：
- *   - 后端算子立即返回 Work（通信在飞），同步/异步的区分在 c10d 层
- *     （async_op=False 时 c10d 调 work.wait()；True 时 Work 给用户）
- *   - wait()/isCompleted() 内部推进请求——循环在 Work 里，
- *     用户永远不用手写循环
- *
- * 异步期间的 tensor 生命周期：Work 持有参与算子的 tensor 引用
- * （tensors_ 成员），防止用户 tensor 在通信完成前被释放。 */
+ * 算子立即返回 Work；同步/异步的区分在 c10d 层（sync 走 work.wait()）。
+ * wait()/isCompleted() 内部推进请求，用户不用手写轮询循环。
+ * Work 持有参与算子的 tensor 引用（tensors_），防止通信完成前被释放。 */
 class WorkKuccl : public Work {
 public:
     /* 空操作构造（零元素/无请求场景）：立即完成 */
@@ -84,6 +78,11 @@ public:
 
     bool wait(std::chrono::milliseconds timeout = kUnsetTimeout) override
     {
+        /* pybind passes timedelta(0) for a bare wait(); non-positive means
+         * "no timeout". Taken literally the loop breaks before a single
+         * poll: wait() reports success while copy-back never ran. */
+        if (timeout <= std::chrono::milliseconds(0))
+            timeout = kUnsetTimeout;
         /* 无超时：自旋推进直到完成（g_api_lock 保证多线程查询安全）。
          * 有超时：到点返回当前状态（不视为失败——用户可再 wait）。 */
         if (timeout == kUnsetTimeout) {
@@ -224,19 +223,11 @@ public:
     static c10::intrusive_ptr<Backend> createBackendKuccl(const c10::intrusive_ptr<Store> &store, int rank, int size,
                                                           const std::chrono::duration<float> &timeout);
 
-    /* auto-register：import kuccl 即自动注册
-     *
-     * PyTorch 2.9 的签名：register_backend(name, func, extended_api=False, devices=None)
-     * ★ devices 必须作为第 4 个参数传入（extended_api 之后）。
-     *   若误传到第 3 个位置（extended_api 槽），truthy 列表会使 PyTorch
-     *   按扩展 API 约定调用工厂 creator_fn(_DistributedBackendOptions, opts)，
-     *   与 createBackendKuccl(store, rank, world_size, timeout) 签名不符，
-     *   init_process_group 将报 TypeError（PyTorch 2.9 行为）。
-     *
-     * devices=["cpu"] 的作用：
-     *   1) 消除 "Device capability unspecified" 告警
-     *   2) 避免 cuda 张量被误路由到 kuccl
-     *   3) 支持 "cpu:kuccl" 设备前缀写法 */
+    /* auto-register：import kuccl 即注册。PyTorch 2.9 签名
+     * register_backend(name, func, extended_api, devices)——devices 必须传
+     * 第 4 参：误传到 extended_api 槽会按扩展 API 调工厂，签名不符报
+     * TypeError。devices=["cpu"] 消除 capability 告警、防 cuda 张量误路由、
+     * 支持 "cpu:kuccl" 写法。 */
     static void autoRegister() __attribute__((constructor))
     {
         py::object module = py::module::import("torch.distributed");
@@ -253,6 +244,10 @@ public:
         int rank_hint = 0;
         int ws_hint = 0;
         std::atomic<std::uint64_t> round{0};
+        /* 宿主销毁标志：置位后 OOB 回调直接放行。KUPL win_free 前有全员
+         * OOB 栅栏，散场时 rank 退出有先后，先退者关 Store 会让慢 rank
+         * 撞 connection reset；拆除阶段已无集合工作，跳过 OOB 安全。 */
+        std::atomic<bool> *shutdown_flag = nullptr;
     };
 
 private:
@@ -261,6 +256,9 @@ private:
     bool comm_ready_ = false;
 
     StoreOobCtx store_oob_; /* 直接成员（生命周期随 BackendKuccl） */
+
+    /* 销毁标志：shutdown() 置位，OOB 回调据此放行（见 StoreOobCtx 注释） */
+    std::atomic<bool> shutting_down_{false};
 
     std::uint64_t barrier_seq_ = 0;
 

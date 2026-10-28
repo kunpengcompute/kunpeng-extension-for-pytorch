@@ -25,8 +25,8 @@ from pathlib import Path
 from setuptools import setup
 from torch.utils.cpp_extension import BuildExtension, CppExtension
 
-HERE      = Path(__file__).parent.resolve()
-LIBKuCCL  = (HERE.parent / "kuccl").resolve()        # 库本体（兄弟目录）
+HERE = Path(__file__).parent.resolve()
+LIBKuCCL = (HERE.parent / "kuccl").resolve()  # 库本体（兄弟目录）
 HUCX_DIR = os.environ.get("HUCX_DIR")
 XUCG_DIR = os.environ.get("XUCG_DIR")
 
@@ -39,16 +39,16 @@ ext_module = CppExtension(
     name="kuccl.kuccl_backend",
     sources=[
         "csrc/backend.cpp",
-        "csrc/oob.cpp",                # Store 版 OOB 工具（适配层私有）
+        "csrc/oob.cpp",  # Store 版 OOB 工具（适配层私有）
     ],
     include_dirs=[
-        str(HERE / "include"),          # backend.hpp / oob.hpp（本包）
-        str(LIBKuCCL / "include"),      # kuccl.h / types.hpp（库公开头）
+        str(HERE / "include"),  # backend.hpp / oob.hpp（本包）
+        str(LIBKuCCL / "include"),  # kuccl.h / types.hpp（库公开头）
         os.path.join(HUCX_DIR, "include"),
         os.path.join(XUCG_DIR, "include"),
     ],
     library_dirs=[
-        str(LIBKuCCL / "build"),        # libkuccl.so 的位置
+        str(LIBKuCCL / "build"),  # libkuccl.so 的位置
         os.path.join(HUCX_DIR, "lib"),
         os.path.join(XUCG_DIR, "lib"),
         os.path.join(XUCG_DIR, "lib", "planc"),
@@ -59,8 +59,14 @@ ext_module = CppExtension(
         os.path.join(XUCG_DIR, "lib"),
         os.path.join(XUCG_DIR, "lib", "planc"),
     ],
-    libraries=["kuccl",                 # 链接 libkuccl.so（不重编库）
-               "ucp", "uct", "ucs", "ucm", "ucg"],
+    libraries=[
+        "kuccl",  # 链接 libkuccl.so（不重编库）
+        "ucp",
+        "uct",
+        "ucs",
+        "ucm",
+        "ucg",
+    ],
     extra_compile_args=["-O2", "-std=c++17", "-fvisibility=hidden"],
     extra_link_args=["-Wl,--as-needed"],
 )

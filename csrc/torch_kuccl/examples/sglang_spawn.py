@@ -27,6 +27,7 @@ def worker(rank: int, world_size: int, master_addr: str, master_port: int):
     print(f"[Rank {rank}] 子进程启动，初始化 process group...", flush=True)
 
     import torch.distributed as dist
+
     dist.init_process_group(
         backend="kuccl",
         init_method=f"tcp://{master_addr}:{master_port}",
@@ -41,8 +42,10 @@ def worker(rank: int, world_size: int, master_addr: str, master_port: int):
     gather_list = [torch.zeros_like(tensor) for _ in range(world_size)]
     dist.all_gather(gather_list, tensor)
 
-    print(f"[Rank {rank}] all_gather 结果: {[t.tolist() for t in gather_list]}",
-          flush=True)
+    print(
+        f"[Rank {rank}] all_gather 结果: {[t.tolist() for t in gather_list]}",
+        flush=True,
+    )
 
     dist.destroy_process_group()
     print(f"[Rank {rank}] 完成", flush=True)
@@ -50,8 +53,7 @@ def worker(rank: int, world_size: int, master_addr: str, master_port: int):
 
 def main():
     parser = argparse.ArgumentParser(description="模拟 SGLang spawn 启动")
-    parser.add_argument("--tp-size", type=int, default=2,
-                        help="张量并行大小（进程数）")
+    parser.add_argument("--tp-size", type=int, default=2, help="张量并行大小（进程数）")
     parser.add_argument("--master-addr", default="127.0.0.1")
     parser.add_argument("--master-port", type=int, default=23457)
     args = parser.parse_args()

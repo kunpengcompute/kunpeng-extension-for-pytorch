@@ -1,0 +1,71 @@
+{
+  "repository": "https://github.com/pytorch/pytorch",
+  "commit": "d0b9d245f4f400496b3a41355330b4322ca267df",
+  "path": "test/distributed/test_c10d_collectives.py",
+  "methods": {
+    "_value": {
+      "line": 46,
+      "sha256": "c7a14abfc149173a40df6cf40e5991ac8586df7fb42ba34b9b9ba7acdd26ee70"
+    },
+    "_tensor": {
+      "line": 51,
+      "sha256": "c1682c1b2803aff03cadee933f23e3daf01c2c4103e5eca37b01c7d09b4d0327"
+    },
+    "_expected_tensor": {
+      "line": 58,
+      "sha256": "03cf05cb3f3e588d8e2c53dc6f225d188634175ec1d765950d86f5836d66051d"
+    },
+    "_wait": {
+      "line": 61,
+      "sha256": "0310156a1bf97917511c818da1491e14424be22be04d64460a0f2abab9c74ec5"
+    },
+    "_expected_reduce_value": {
+      "line": 75,
+      "sha256": "a3212e4b6e384b293f2480a66f01156fba1af4bd6b6da5c5a879cf1495d0e2c6"
+    },
+    "_expected_reduce": {
+      "line": 105,
+      "sha256": "a8228512b39c452b27e7c9f2769328b11c9bbc37aeac9e92819dc34557765bcd"
+    },
+    "_test_broadcast": {
+      "line": 111,
+      "sha256": "12d277d77ef01f343fc30e8fa4535176117ef787e333971167f108898eaf6422"
+    },
+    "_test_all_gather": {
+      "line": 117,
+      "sha256": "599c548a51924bafc2390a7e2b05ca7d7b1d3a5b3f12c60f4b7610e4712a73ec"
+    },
+    "_test_all_gather_single": {
+      "line": 125,
+      "sha256": "580bdf4789c6358d623eb72338716a6cb0d525eaeab31d1dc9b98a4fcb6a6860"
+    },
+    "_test_all_to_all_single": {
+      "line": 199,
+      "sha256": "98b5fdddc237ca1db3058d27a442d5903882a99e6b9f5f4646a671dfaee8eeab"
+    },
+    "_test_transport_matrix": {
+      "line": 217,
+      "sha256": "5c5e34fce4faddabaea98e26740897469217744cb6862a5eefcc088d6f3a3d1e"
+    },
+    "test_broadcast": {
+      "line": 226,
+      "sha256": "b1ed238eaf412825903f39313eeb847b52c7afc011082d82289a36fab4ad394f"
+    },
+    "test_all_gather": {
+      "line": 229,
+      "sha256": "284eb3467f80256560ef2268d8b0f2971a782ad1aa47e33b1ae0e9da849605b1"
+    },
+    "test_all_gather_single": {
+      "line": 248,
+      "sha256": "7ef87f7c3e7c69bddb3935979be2ab1d7c4383fa5e7524f4d3a499ecd98251b8"
+    },
+    "test_all_to_all_single": {
+      "line": 279,
+      "sha256": "cc3af0f792a94aa89dba30630f820e93e6ee5f8da73e032e202e4c45b857b067"
+    },
+    "test_all_reduce": {
+      "line": 371,
+      "sha256": "980fc0ebc7b3f457e84a399e26cd27839ef8f6bb318fa3d6f091a5706ce5ddc5"
+    }
+  }
+}

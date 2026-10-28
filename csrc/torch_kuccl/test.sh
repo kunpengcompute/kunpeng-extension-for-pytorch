@@ -12,8 +12,8 @@
 #   python tests/test_subgroup.py             子组/重叠通信域
 #   python tests/test_allreduce_coalesced.py  多 tensor 合并归约
 #   python tests/test_init_timing.py          建组耗时打点（KuCCL_TIMING=1）
-#   python tests/test_spec_case1.py           设计书验收用例 1
-#   bash ../benchmarks/communication/bash.md  # DeepSpeed 套件见此速查
+#   python tests/test_spec_case1.py           cpu:kuccl 加载路径用例
+#   DeepSpeed 套件速查见 benchmarks/communication/
 #
 # 性能 A/B 验证（含环境开关矩阵）见 docs/优化记录.md §4。
 
@@ -22,7 +22,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # 没激活环境就自动 source
-if [[ "${CONDA_DEFAULT_ENV:-}" != "${KuCCL_CONDA_ENV:-kuccl291}" ]]; then
+if [[ "${CONDA_DEFAULT_ENV:-}" != "${KuCCL_CONDA_ENV:-kuccl}" ]]; then
     echo "[env] 未激活环境，自动 source ./env.sh ..."
     # shellcheck disable=SC1091
     source "${SCRIPT_DIR}/env.sh"
@@ -37,7 +37,7 @@ echo "══════ [1/3] kuccl 正确性（ws=2，含 stress 背靠背压�
 python "${SCRIPT_DIR}/tests/correctness.py" --world-size 2
 
 echo ""
-echo "══════ [2/3] 设计书原语法 cpu:kuccl（设备:后端 前缀格式）══════"
+echo "══════ [2/3] cpu:kuccl 规格语法（设备:后端 格式）══════"
 python "${SCRIPT_DIR}/tests/correctness.py" --world-size 2 --backends "cpu:kuccl"
 
 echo ""

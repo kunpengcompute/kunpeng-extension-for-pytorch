@@ -10,9 +10,10 @@
 #   build.sh 门禁①失败（构建期拦截，不再是运行时 undefined symbol）
 # ╓ 符号面（对齐评审约定）────────────────────────────────────────────╖
 #   公开集合接口 4 个（AllGather/AllReduce/Broadcast/AllToAll）+
-#   通信域管理 4 + Test 1 + 生产化设施 3 = 12 个公开接口。
+#   通信域管理 4 + Test 1 + 生产化设施 3 = 12 个（KuCCL_1.1）
+#   + 版本查询 1（KuCCL_1.2）= 13 个公开接口。
 # ╓ 版本节点（为 ABI 演进预留）───────────────────────────────────────╖
-#   后续新增接口 → 新增 KuCCL_1.2 节点，老程序仍解析到 1.1 符号。
+#   后续新增接口 → 新增 KuCCL_1.3 节点，老程序仍解析到 1.1/1.2 符号。
 
 KuCCL_1.1 {
   global:
@@ -32,6 +33,14 @@ KuCCL_1.1 {
     kucclGetLastError;
     kucclCommAbort;
     kucclFlushComm;
+  local:
+    *;
+};
+
+KuCCL_1.2 {
+  global:
+    # 版本查询（1）—— 新增接口进新版本节点（ABI 演进约定）
+    kucclGetVersion;
   local:
     *;
 };

@@ -29,8 +29,11 @@ from conftest import spawn_and_run, init_group, rank_log
 def check(rank, got, expected, tag):
     """校验并打印结果。"""
     ok = torch.equal(got, expected)
-    rank_log(rank, f"{tag}: got={got.tolist()} expected={expected.tolist()} "
-             f"-> {'PASS' if ok else 'FAIL'}")
+    rank_log(
+        rank,
+        f"{tag}: got={got.tolist()} expected={expected.tolist()} "
+        f"-> {'PASS' if ok else 'FAIL'}",
+    )
     return ok
 
 
@@ -43,30 +46,36 @@ def worker(rank: int, world_size: int, port: int):
     #   rank0 [256,1000,-5,7]，rank1 [255,999,3,8]
     #   逐字节 min 会给错（0xFF 截断），元素级 min 才正确
     #   期望 min = [255, 999, -5, 7]
-    y = torch.tensor([256, 1000, -5, 7] if rank == 0 else [255, 999, 3, 8],
-                     dtype=torch.int32)
+    y = torch.tensor(
+        [256, 1000, -5, 7] if rank == 0 else [255, 999, 3, 8], dtype=torch.int32
+    )
     dist.all_reduce(y, op=dist.ReduceOp.MIN)
-    all_ok &= check(rank, y,
-                    torch.tensor([255, 999, -5, 7], dtype=torch.int32),
-                    "int32 min (byte-vs-element)")
+    all_ok &= check(
+        rank,
+        y,
+        torch.tensor([255, 999, -5, 7], dtype=torch.int32),
+        "int32 min (byte-vs-element)",
+    )
 
     # ── 用例 2：float32 SUM ──────────────────────────────────
     #   各 rank 贡献 [rank, rank, ...]，SUM = [0+1+..+ws-1, ...]
     s = torch.full((4,), float(rank), dtype=torch.float32)
     dist.all_reduce(s, op=dist.ReduceOp.SUM)
     expected_sum = float(sum(range(world_size)))
-    all_ok &= check(rank, s,
-                    torch.full((4,), expected_sum, dtype=torch.float32),
-                    "float32 sum")
+    all_ok &= check(
+        rank, s, torch.full((4,), expected_sum, dtype=torch.float32), "float32 sum"
+    )
 
     # ── 用例 3：int32 MAX（含负数）──────────────────────────
     m = torch.tensor([-rank, rank * 10, -100, rank], dtype=torch.int32)
     dist.all_reduce(m, op=dist.ReduceOp.MAX)
     expected_max = torch.tensor(
-        [max(-r for r in range(world_size)),
-         max(r * 10 for r in range(world_size)),
-         -100,
-         max(r for r in range(world_size))],
+        [
+            max(-r for r in range(world_size)),
+            max(r * 10 for r in range(world_size)),
+            -100,
+            max(r for r in range(world_size)),
+        ],
         dtype=torch.int32,
     )
     all_ok &= check(rank, m, expected_max, "int32 max")

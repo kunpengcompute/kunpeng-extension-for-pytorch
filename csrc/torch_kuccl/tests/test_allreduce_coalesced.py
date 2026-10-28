@@ -56,8 +56,11 @@ def worker(rank: int, world_size: int, port: int):
     ok2a = torch.equal(t2a, expected2a)
     ok2b = torch.equal(t2b, expected2b)
     ok2c = torch.equal(t2c, expected2c)
-    rank_log(rank, f"多 tensor coalesced: a={'PASS' if ok2a else 'FAIL'} "
-             f"b={'PASS' if ok2b else 'FAIL'} c={'PASS' if ok2c else 'FAIL'}")
+    rank_log(
+        rank,
+        f"多 tensor coalesced: a={'PASS' if ok2a else 'FAIL'} "
+        f"b={'PASS' if ok2b else 'FAIL'} c={'PASS' if ok2c else 'FAIL'}",
+    )
     all_ok &= ok2a and ok2b and ok2c
 
     # ── 用例 3：多 tensor MIN（验证 dtype 没被错误处理）──────
@@ -66,7 +69,7 @@ def worker(rank: int, world_size: int, port: int):
 
     dist.all_reduce_coalesced([t3a, t3b], op=dist.ReduceOp.MIN)
 
-    expected3a = torch.tensor([0, 0], dtype=torch.int32)   # min(0,1,...,ws-1)
+    expected3a = torch.tensor([0, 0], dtype=torch.int32)  # min(0,1,...,ws-1)
     expected3b = torch.tensor([0, 0], dtype=torch.int32)
     ok3 = torch.equal(t3a, expected3a) and torch.equal(t3b, expected3b)
     rank_log(rank, f"多 tensor MIN: {'PASS' if ok3 else 'FAIL'}")

@@ -1,15 +1,9 @@
 /*
  * coll_test_mpi.cpp —— MPI 进程直接拉起 kuccl
  *
- * 覆盖接口（功能验证必测项）：
- *   kucclGetUniqueId / kucclCommInitRankConfig / kucclAllReduce /
- *   kucclBroadcast / kucclAllGather / kucclAllToAll / kucclTest /
- *   kucclCommDestroy；可选 --test-split 附加 kucclCommSplit 验证
- *
- *   1. config.oob_allgather 不能直接赋 MPI_Allgather（回调签名不同），
- *      需要包装函数把 kuccl 回调签名桥接到 MPI_Allgather
- *   2. kucclTest 的 status 出参是 kucclStatus_t*，不能传 MPI_STATUS_IGNORE
- *   3. 修正示例中 flag 重复声明 / request 变量名不一致 / h_recv 等笔误
+ * 覆盖接口：kucclGetUniqueId / kucclCommInitRankConfig / kucclAllReduce /
+ * kucclBroadcast / kucclAllGather / kucclAllToAll / kucclTest /
+ * kucclCommDestroy；可选 --test-split 附加 kucclCommSplit 验证。
  *
  * 编译运行命令见 RUN.md ⑤。
  */

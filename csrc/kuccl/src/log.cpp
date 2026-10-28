@@ -161,6 +161,44 @@ static int append_line(char *buf, std::size_t cap, int off, const char *fmt, ...
     return off + (n < room ? n : room);
 }
 
+/* ── 日志文件：KUCCL_LOG_FILE=path。
+ * 设置后日志在 stderr 之外同时写入文件（关键日志落盘，跑分后可查）：
+ *   KUCCL_LOG_FILE=/tmp/kuccl.log      全 rank 共写一个文件
+ *                                       （fopen "a" = O_APPEND，行级原子追加）
+ *   KUCCL_LOG_FILE=/tmp/kuccl_r%r.log  %r 展开为 rank 号 → 每 rank 独立文件
+ *                                       （完全无交错，TRACE 刷屏场景首选）
+ * 未设置 = 仅 stderr（行为不变）。文件以无缓冲模式打开：每行一次 write，
+ * 多进程/多线程不会把一行拆开。 */
+static FILE *log_file_stream(int rank)
+{
+    static FILE *fp = nullptr;
+    static bool resolved = false;
+    if (resolved)
+        return fp;
+    const char *path = std::getenv("KUCCL_LOG_FILE");
+    if (path == nullptr || path[0] == '\0') {
+        resolved = true; /* 未设置：永远仅 stderr */
+        return nullptr;
+    }
+    if (rank < 0)
+        return nullptr; /* 已设置但本条日志无 rank 上下文：等首个带 rank 的日志定档文件名 */
+    resolved = true;
+    const char *pct = std::strstr(path, "%r");
+    if (pct == nullptr) {
+        fp = std::fopen(path, "a");
+    } else {
+        char buf[512];
+        std::snprintf(buf, sizeof(buf), "%.*s%d%s", static_cast<int>(pct - path), path, rank, pct + 2);
+        fp = std::fopen(buf, "a");
+    }
+    if (fp != nullptr) {
+        std::setvbuf(fp, nullptr, _IONBF, 0); /* 无缓冲：每行一次 write，行不被拆 */
+    } else {
+        std::fprintf(stderr, "[KuCCL][WARN] KUCCL_LOG_FILE='%s' 打开失败，日志仅输出 stderr\n", path);
+    }
+    return fp;
+}
+
 void log_write(LogLevel lv, int rank, const char *file, int line, const char *fmt, ...)
 {
     if (!rank_allowed(rank))
@@ -218,6 +256,10 @@ void log_write(LogLevel lv, int rank, const char *file, int line, const char *fm
 
     std::fputs(buf, stderr);
     std::fflush(stderr);
+    /* KUCCL_LOG_FILE 设置时同步落盘（无缓冲模式，行级原子） */
+    if (FILE *fp = log_file_stream(rank)) {
+        std::fputs(buf, fp);
+    }
 }
 
 } /* namespace detail */

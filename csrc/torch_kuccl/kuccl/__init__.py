@@ -33,9 +33,9 @@ _PKG_DIR = Path(__file__).resolve().parent
 _HUCX_DIR = Path(os.environ.get("HUCX_DIR", _PKG_DIR / "install" / "hucx")).resolve()
 _XUCG_DIR = Path(os.environ.get("XUCG_DIR", _PKG_DIR / "install" / "xucg")).resolve()
 
-_HUCX_LIB_DIR   = _HUCX_DIR / "lib"
+_HUCX_LIB_DIR = _HUCX_DIR / "lib"
 _HUCX_MODULE_DIR = _HUCX_LIB_DIR / "ucx"
-_XUCG_LIB_DIR   = _XUCG_DIR / "lib"
+_XUCG_LIB_DIR = _XUCG_DIR / "lib"
 _XUCG_PLANC_DIR = _XUCG_LIB_DIR / "planc"
 
 
@@ -72,8 +72,14 @@ if _force_ucx_tls:
 # ============================================================================
 
 _UCX_LIBRARY_NAMES = (
-    "libucs.so", "libucm.so", "libuct.so", "libucp.so",
-    "libucg.so", "libuct_ib.so", "libucg_planc", "libucg_planm",
+    "libucs.so",
+    "libucm.so",
+    "libuct.so",
+    "libucp.so",
+    "libucg.so",
+    "libuct_ib.so",
+    "libucg_planc",
+    "libucg_planm",
 )
 
 
@@ -83,7 +89,9 @@ def _get_loaded_ucx_libraries() -> list:
         return []
     libraries = set()
     try:
-        for line in maps_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        for line in maps_path.read_text(
+            encoding="utf-8", errors="replace"
+        ).splitlines():
             fields = line.split()
             if not fields:
                 continue
@@ -100,8 +108,10 @@ def _get_loaded_ucx_libraries() -> list:
 
 _loaded_before = _get_loaded_ucx_libraries()
 if _loaded_before:
-    print("[KuCCL] WARNING: UCX/UCG libraries already loaded before kuccl init:",
-          flush=True)
+    print(
+        "[KuCCL] WARNING: UCX/UCG libraries already loaded before kuccl init:",
+        flush=True,
+    )
     for _p in _loaded_before:
         print(f"[KuCCL]   preloaded: {_p}", flush=True)
 
@@ -122,11 +132,13 @@ def _resolve_library(directory: Path, candidates: Iterable[str]) -> Path:
         if path.exists():
             return path.absolute()
     raise RuntimeError(
-        "KuCCL required library not found. Searched:\n  " + "\n  ".join(searched))
+        "KuCCL required library not found. Searched:\n  " + "\n  ".join(searched)
+    )
 
 
-def _load_required_library(label: str, directory: Path,
-                            candidates: Iterable[str]) -> ctypes.CDLL:
+def _load_required_library(
+    label: str, directory: Path, candidates: Iterable[str]
+) -> ctypes.CDLL:
     path = _resolve_library(directory, candidates)
     try:
         handle = ctypes.CDLL(str(path), mode=_RTLD_FLAGS)
@@ -148,7 +160,9 @@ if _HUCX_LIB_DIR.is_dir():
 if _XUCG_LIB_DIR.is_dir():
     _load_required_library("libucg", _XUCG_LIB_DIR, ("libucg.so.0", "libucg.so"))
     if _XUCG_PLANC_DIR.is_dir():
-        _load_required_library("libucg_planc_ucx", _XUCG_PLANC_DIR, ("libucg_planc_ucx.so",))
+        _load_required_library(
+            "libucg_planc_ucx", _XUCG_PLANC_DIR, ("libucg_planc_ucx.so",)
+        )
 
 # 库本体 libkuccl（PyInstaller 打包布局：包内 lib/ 目录）。
 # 先按 SONAME 登记，后续 kuccl_backend 的 DT_NEEDED libkuccl.so.2 即可解析；
@@ -169,10 +183,12 @@ for _so in sorted(_PKG_DIR.glob("lib/libkuccl.so*")):
 if "kuccl.kuccl_backend" in sys.modules:
     raise RuntimeError(
         "kuccl.kuccl_backend was imported before the private HUCX/XUCG runtime "
-        "was initialized. Ensure `import kuccl` comes first.")
+        "was initialized. Ensure `import kuccl` comes first."
+    )
 
 try:
-    import torch
+    import torch  # noqa: F401  (可用性探测)
+
     _ext = importlib.import_module("kuccl.kuccl_backend")
 except ImportError as _e:
     _msg = str(_e)
@@ -223,8 +239,9 @@ if os.environ.get("KuCCL_LIBRARY_DEBUG", "0") != "0":
 _private_roots = (str(_HUCX_DIR), str(_XUCG_DIR))
 _unexpected = [p for p in _loaded_after if not p.startswith(_private_roots)]
 if _unexpected:
-    print("[KuCCL] WARNING: UCX/UCG libraries outside private runtime loaded:",
-          flush=True)
+    print(
+        "[KuCCL] WARNING: UCX/UCG libraries outside private runtime loaded:", flush=True
+    )
     for _p in _unexpected:
         print(f"[KuCCL]   unexpected: {_p}", flush=True)
 

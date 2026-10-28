@@ -57,16 +57,10 @@ bool allreduce_inplace_enabled()
     return v;
 }
 
-/* ── allreduce 输入快照：独立副本，正确性与底层算法解耦 ──────────
- *
- * 拷贝路径按消息大小分段（默认分界 4MB，可调）：
- *   ≤ TORCH_KUCCL_SNAPSHOT_SERIAL_MAX：串行 memcpy（不修改线程配置）
- *   更大：线程数收敛到可用核数后 clone，结束恢复
- *
- * 真实核数 = 调用线程绑定的 CPU 集合（sched_getaffinity）∩ cgroup CPU
- * 配额。绑定集合是线程数上限（超过必然超订），但可能与他人共享。
- * 收敛只缩不放：宿主线程数不超过该值时不动，尊重上层配置；
- * RAII 保证异常路径恢复。 */
+/* allreduce 输入快照：独立副本，正确性与底层算法解耦。
+ * ≤TORCH_KUCCL_SNAPSHOT_SERIAL_MAX 串行 memcpy；更大时线程数收敛到
+ * 可用核数（sched_getaffinity ∩ cgroup 配额）后 clone，RAII 恢复。
+ * 收敛只缩不放（超订必然发生在绑定集合之上）。 */
 
 /* 分段阈值（字节）：TORCH_KUCCL_SNAPSHOT_SERIAL_MAX 可按部署环境重标 */
 static size_t package_threshold_mt()
@@ -271,16 +265,9 @@ kucclRedOp_t BackendKuccl::torchToKucclRedOp(const ReduceOp &op)
     TORCH_CHECK(false, "kuccl only supports SUM/MIN/MAX reduce op");
 }
 
-/* ════════════════════════════════════════════════════════════
- * PyTorch Store → kuccl 库 OOB 回调的桥接
- *
- * kuccl 纯库（libkuccl.so）不认识 c10d::Store（OOB 留给调用方注入）。
- * 适配层在这里把 Store 封装成 config.oob_allgather 需要的函数指针。
- *
- * 回调签名（types.hpp）：int(const void* send, void* recv, int count, void* ctx)
- * 语义对齐 MPI_Allgather：每 rank 贡献 count 字节，收齐后按 rank 拼接。
- * StoreOobCtx 完整定义在 backend.hpp（public 嵌套结构）。
- * ════════════════════════════════════════════════════════════*/
+/* PyTorch Store → kuccl OOB 回调的桥接：纯库不认识 c10d::Store，
+ * 这里封装成 config.oob_allgather 的函数指针（签名与语义见 types.hpp）。
+ * StoreOobCtx 定义在 backend.hpp。 */
 namespace {
 
 /* Store 版 allgather 回调：把 kuccl 库的 OOB 请求转成 kuccl::oob_allgather */
@@ -289,6 +276,12 @@ int store_oob_allgather_cb(const void *sendbuf, void *recvbuf, int count, void *
     auto *ctx = static_cast<BackendKuccl::StoreOobCtx *>(user_ctx);
     if (!ctx || !ctx->store)
         return -1;
+    /* 销毁阶段放行：KUPL win_free 的收尾 OOB 栅栏不再真去 TCPStore——
+     * 此刻先退场的 rank 可能已关闭连接，喊话必然撞墙（散场竞态）。
+     * 拆除前所有集合工作已完成且同步过，假成功是安全的。 */
+    if (ctx->shutdown_flag != nullptr && ctx->shutdown_flag->load(std::memory_order_acquire)) {
+        return 0;
+    }
     /* 轮次递增 → key 前缀唯一，避免多次 OOB 交换互相覆盖 */
     const std::uint64_t r = ctx->round.fetch_add(1, std::memory_order_relaxed);
     const std::string prefix = "kuccl_oob_" + std::to_string(r) + "_";
@@ -303,14 +296,9 @@ int store_oob_allgather_cb(const void *sendbuf, void *recvbuf, int count, void *
 
 } /* anonymous namespace */
 
-/* ── 构造函数 ──────────────────────────────────────────────
- *
- * 适配层职责（构造期）：
- *   1. 用 Store 把 rank 0 的 uniqueId 广播给所有 rank（rendezvous）
- *   2. 构造 kucclConfig_t：注入 Store 版 OOB 回调（kuccl 库据此完成引导）
- *   3. kucclCommInitRankConfig 创建通信域（进程级单例 + 两阶段地址交换在库内完成）
- *
- * store_ 是 PyTorch 传入的 per-group PrefixStore（组隔离天然成立）。 */
+/* 构造：Store 广播 uniqueId（rendezvous）→ 注入 Store 版 OOB 回调 →
+ * kucclCommInitRankConfig 建通信域。
+ * store_ 为 per-group PrefixStore，组隔离天然成立。 */
 BackendKuccl::BackendKuccl(c10::intrusive_ptr<Store> store, int rank, int world_size,
                            std::chrono::milliseconds /*timeout*/)
     : Backend(rank, world_size), store_(std::move(store))
@@ -322,6 +310,7 @@ BackendKuccl::BackendKuccl(c10::intrusive_ptr<Store> store, int rank, int world_
     store_oob_.store = store_.get();
     store_oob_.rank_hint = rank;
     store_oob_.ws_hint = world_size;
+    store_oob_.shutdown_flag = &shutting_down_;
 
     /* 1. rank 0 生成 uniqueId，通过 Store 广播（所有 rank 必须拿到同一个 ID） */
     kucclUniqueId uniqueId;
@@ -363,15 +352,26 @@ BackendKuccl::BackendKuccl(c10::intrusive_ptr<Store> store, int rank, int world_
     }
 
     /* 4. 创建通信域（自动选中的 kupl 不可用时回退 xucg 重建） */
+    const char *chosen_backend = config.backend; /* 自动选择/auto_kupl 回退时此处已正确 */
+    if (chosen_backend == nullptr) {
+        /* 显式 env 指定时 config.backend 为空（库侧自行读 env）——
+         * 标签从 env 取，避免误报 xucg */
+        const char *pinned = std::getenv("KUCCL_BACKEND_TYPE");
+        chosen_backend = (pinned != nullptr && pinned[0] != '\0') ? pinned : "xucg";
+    }
     kucclResult_t r = kucclCommInitRankConfig(&comm_, world_size, uniqueId, rank, &config);
     if (r != KuCCL_SUCCESS && auto_kupl) {
         TORCH_WARN("kuccl: kupl backend unavailable (not built in or init failed), "
                    "falling back to xucg");
         config.backend = "xucg";
+        chosen_backend = "xucg";
         r = kucclCommInitRankConfig(&comm_, world_size, uniqueId, rank, &config);
     }
     TORCH_CHECK(r == KuCCL_SUCCESS, "kucclCommInitRankConfig failed (result=", (int)r, ")");
     comm_ready_ = true;
+
+    /* 版本与后端打点（排障第一步：出事先核对版本/后端，防"跑错 .so"） */
+    std::fprintf(stderr, "[KuCCL] init: %s (backend=%s, ws=%d)\n", kucclGetVersion(), chosen_backend, world_size);
 }
 
 BackendKuccl::~BackendKuccl()
@@ -388,6 +388,9 @@ BackendKuccl::~BackendKuccl()
 void BackendKuccl::shutdown()
 {
     if (comm_ready_ && comm_) {
+        /* 先置销毁标志：此后 OOB 回调放行（拆除阶段不再依赖 Store），
+         * 再 abort 使在飞 Work 后续 poll 得到 ERROR 而非触碰已销毁的 group */
+        shutting_down_.store(true, std::memory_order_release);
         kucclCommAbort(comm_);
     }
 }
@@ -398,6 +401,10 @@ c10::intrusive_ptr<Work> BackendKuccl::allgather(std::vector<std::vector<at::Ten
 {
     TORCH_CHECK(inputTensors.size() == 1, "kuccl allgather expects exactly 1 input tensor");
     TORCH_CHECK(outputTensors.size() == 1, "kuccl allgather expects exactly 1 output list");
+
+    /* zero-element: valid no-op (PyTorch semantics; library rejects count=0) */
+    if (inputTensors[0].numel() == 0)
+        return c10::make_intrusive<WorkKuccl>(OpType::ALLGATHER);
 
     const int ws = getSize();
     auto &outList = outputTensors[0];
@@ -487,6 +494,10 @@ c10::intrusive_ptr<Work> BackendKuccl::broadcast(std::vector<at::Tensor> &tensor
     TORCH_CHECK(t.is_contiguous(), "kuccl broadcast 需要 contiguous tensor");
     TORCH_CHECK(t.device().is_cpu(), "kuccl broadcast 目前仅支持 CPU tensor");
 
+    /* zero-element: valid no-op (PyTorch semantics; library rejects count=0) */
+    if (t.numel() == 0)
+        return c10::make_intrusive<WorkKuccl>(OpType::BROADCAST);
+
     const int root = static_cast<int>(opts.rootRank);
     const size_t count = static_cast<size_t>(t.numel());
     const kucclDataType_t dt = torchToKucclDtype(t.scalar_type());
@@ -500,19 +511,19 @@ c10::intrusive_ptr<Work> BackendKuccl::broadcast(std::vector<at::Tensor> &tensor
 }
 
 /* ── allreduce ────────────────────────────────────────────
- *
- * 实现 coalesced（合并归约）策略：多 tensor 拼成连续 buffer，
- * 一轮通信完成（同 DDP Reducer 的 bucket flatten 思路）。
- *
- * 单 tensor（tensors.size()==1）：直接调 kucclAllReduce，零开销。
- * 多 tensor（tensors.size()>1）：拼成连续 buffer → 1 次 allreduce → 拆回。
- *   比 for 循环快 N 倍（for 循环做 N 轮通信，coalesced 只做 1 轮）。
- *
- * 约束：所有 tensor 必须 dtype 相同、CPU、contiguous。
- * 这是 PyTorch allreduce_coalesced 的标准约束。 */
+ * coalesced：多 tensor 拼连续 buffer，一轮通信完成（DDP bucket 思路）。
+ * 单 tensor 直调零开销；多 tensor 拼 → 1 次 allreduce → 拆回（for 循环
+ * 是 N 轮通信）。约束：dtype 相同、CPU、contiguous（PyTorch 标准约束）。 */
 c10::intrusive_ptr<Work> BackendKuccl::allreduce(std::vector<at::Tensor> &tensors, const AllreduceOptions &opts)
 {
     TORCH_CHECK(!tensors.empty(), "kuccl allreduce: empty tensor list");
+
+    /* PyTorch semantics: zero-element collectives are valid no-ops (the
+     * upstream suite tests n=0 explicitly); the library's count>0 validation
+     * must not leak as a hard error. Same for broadcast/allgather below. */
+    for (const at::Tensor &t : tensors)
+        if (t.numel() == 0)
+            return c10::make_intrusive<WorkKuccl>(OpType::ALLREDUCE);
 
     /* 单 tensor 快速路径：直接调，不拼 buffer */
     if (tensors.size() == 1) {
@@ -779,11 +790,8 @@ c10::intrusive_ptr<Backend> BackendKuccl::createBackendKuccl(const c10::intrusiv
 
 } // namespace c10d
 
-/* ════════════════════════════════════════════════════════════
- * PYBIND11_MODULE — 唯一入口
- * __attribute__((constructor)) 在 backend.hpp 中实现自动注册，
- * 用户只需 `import kuccl` 即可，无需手动 register_backend。
- * ════════════════════════════════════════════════════════════*/
+/* PYBIND11_MODULE 唯一入口；constructor 自动注册（backend.hpp），
+ * `import kuccl` 即完成注册。 */
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 {
     m.doc() = "KuCCL (UCX + UCG) PyTorch Backend V2 — auto-registered on import";
