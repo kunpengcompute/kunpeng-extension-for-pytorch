@@ -42,7 +42,7 @@ def worker(rank: int, world_size: int, port: int):
     out = [torch.zeros(1, dtype=torch.int32) for _ in range(world_size)]
     dist.all_gather(out, t)
     got = [x.item() for x in out]
-    ok = (got == list(range(world_size)))
+    ok = got == list(range(world_size))
     rank_log(rank, f"world allgather: {got} -> {'PASS' if ok else 'FAIL'}")
     all_ok &= ok
 
@@ -71,9 +71,8 @@ def worker(rank: int, world_size: int, port: int):
         dist.all_gather(out, t, group=g)
         got = [x.item() for x in out]
         exp = sorted(members)
-        ok = (got == exp)
-        rank_log(rank, f"子组 {members} allgather: {got} "
-                 f"-> {'PASS' if ok else 'FAIL'}")
+        ok = got == exp
+        rank_log(rank, f"子组 {members} allgather: {got} -> {'PASS' if ok else 'FAIL'}")
         all_ok &= ok
 
     dist.barrier()

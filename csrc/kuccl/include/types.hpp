@@ -4,22 +4,14 @@
 /*
  * KuCCL 公共类型定义
  *
- * 本文件属于 kuccl 纯库，禁止依赖任何框架头文件
- * （不 include torch/mpi/pybind —— 那些属于 kuccl_backend 适配层）。
- *
- * 类型命名：kucclResult_t / kucclComm_t / kucclUniqueId / kucclDataType_t 等
- * 保持 C 兼容（extern "C"）。
+ * 纯库头文件，禁止依赖 torch/mpi/pybind（那些属于适配层）。
+ * 类型命名保持 C 兼容（extern "C"）。
  */
 
 #include <stddef.h>
 #include <stdint.h>
 
-/* ════════════════════════════════════════════════════════════
- * 符号可见性宏（KuCCL_API）
- *
- * 放在 types.hpp（所有 cpp 都会 include 它），保证库内各文件统一。
- * 编译库时 -DKuCCL_EXPORTS → 符号导出；用户 include 时宏为空。
- * ════════════════════════════════════════════════════════════*/
+/* 符号可见性宏：编译库时 -DKuCCL_EXPORTS 导出；用户 include 时为空。 */
 #if defined(KuCCL_EXPORTS)
 #define KuCCL_API __attribute__((visibility("default")))
 #else
@@ -81,14 +73,8 @@ typedef enum {
     kucclMax = 2
 } kucclRedOp_t;
 
-/* ════════════════════════════════════════════════════════════
- * OOB 回调签名 —— kuccl 库唯一的引导通道（留给调用方注入）
- *
- * kuccl 库本身不做 TCPStore/MPI，引导期的数据交换（地址、bootstrap 记录、
- * CommSplit 的 color）全部通过用户注入的这两个回调完成：
- *   - MPI 程序：     config.oob_allgather = MPI_Allgather
- *   - PyTorch 程序： kuccl_backend 适配层注入基于 c10d::Store 的封装
- * ════════════════════════════════════════════════════════════*/
+/* OOB 回调签名 —— 库唯一的引导通道（调用方注入）：
+ * MPI 程序注入 MPI_Allgather；PyTorch 适配层注入 c10d::Store 封装。 */
 
 /* OOB allgather：语义对齐 MPI_Allgather
  *   sendbuf     - 本进程贡献的数据
@@ -115,7 +101,7 @@ typedef struct kucclConfig {
     /* 后端选择：
      *   nullptr / "xucg" - 默认，UCG 集合通信后端（单机 + 跨节点）
      *   "ucg"            - "xucg" 的兼容别名
-     *   "kupl"           - 预留（单机共享内存优化路径，尚未实现）
+     *   "kupl"           - 单机共享内存快路径
      * 环境变量 KUCCL_BACKEND_TYPE 可覆盖（config 优先级更高） */
     const char *backend;
 } kucclConfig_t;

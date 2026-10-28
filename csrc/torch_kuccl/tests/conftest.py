@@ -13,13 +13,10 @@ conftest.py —— pytest 共享 fixtures
 """
 
 import os
-import sys
 from datetime import timedelta
 from typing import Callable
 
-import torch
 import torch.distributed as dist
-import torch.multiprocessing as mp
 
 # import kuccl 即自动注册 "kuccl" backend（无需手动 register_backend）
 import kuccl  # noqa: F401

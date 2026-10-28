@@ -40,14 +40,15 @@ def worker(rank: int, world_size: int, port: int):
     expected = torch.empty(world_size * per_rank, dtype=torch.int32)
     for src in range(world_size):
         # src rank 的第 rank 块
-        block = torch.arange(src * 10 + rank * per_rank,
-                             src * 10 + rank * per_rank + per_rank,
-                             dtype=torch.int32)
+        block = torch.arange(
+            src * 10 + rank * per_rank,
+            src * 10 + rank * per_rank + per_rank,
+            dtype=torch.int32,
+        )
         expected[src * per_rank : (src + 1) * per_rank] = block
 
     ok = torch.equal(recv, expected)
-    rank_log(rank, f"等长 alltoall: {'PASS' if ok else 'FAIL'} "
-             f"(recv={recv.tolist()})")
+    rank_log(rank, f"等长 alltoall: {'PASS' if ok else 'FAIL'} (recv={recv.tolist()})")
     all_ok &= ok
 
     # ── 用例 2：变长 all_to_all_single（数值校验，任意 world_size≥2）──
@@ -55,19 +56,17 @@ def worker(rank: int, world_size: int, port: int):
     #   自环对 M[r][r] 天然一致，不存在配对越界）
     #   用 float32（4 字节元素）：若底层把元素错当字节，数值必错
     if world_size >= 2:
-        M = [[(r + j) % 3 for j in range(world_size)]
-             for r in range(world_size)]
-        in_splits = M[rank]                                # 发给 j 的元素数
+        M = [[(r + j) % 3 for j in range(world_size)] for r in range(world_size)]
+        in_splits = M[rank]  # 发给 j 的元素数
         out_splits = [M[j][rank] for j in range(world_size)]  # 从 j 收的元素数
         in_total = sum(in_splits)
         out_total = sum(out_splits)
 
-        send_v = (rank * 1000.0
-                  + torch.arange(in_total, dtype=torch.float32))
+        send_v = rank * 1000.0 + torch.arange(in_total, dtype=torch.float32)
         recv_v = torch.empty(out_total, dtype=torch.float32)
-        dist.all_to_all_single(recv_v, send_v,
-                               output_split_sizes=out_splits,
-                               input_split_sizes=in_splits)
+        dist.all_to_all_single(
+            recv_v, send_v, output_split_sizes=out_splits, input_split_sizes=in_splits
+        )
 
         # 期望：recv 第 j 段 = rank j 的发送缓冲中发给本 rank 的那一段
         expected = torch.empty(out_total, dtype=torch.float32)
@@ -75,14 +74,17 @@ def worker(rank: int, world_size: int, port: int):
         for j in range(world_size):
             off = sum(M[j][k] for k in range(rank))  # j 缓冲中位于本段之前的量
             n = M[j][rank]
-            expected[pos:pos + n] = (
-                j * 1000.0
-                + torch.arange(off, off + n, dtype=torch.float32))
+            expected[pos : pos + n] = j * 1000.0 + torch.arange(
+                off, off + n, dtype=torch.float32
+            )
             pos += n
 
         ok = torch.equal(recv_v, expected)
-        rank_log(rank, f"变长 alltoall(数值): {'PASS' if ok else 'FAIL'} "
-                 f"(recv={recv_v.tolist()} expected={expected.tolist()})")
+        rank_log(
+            rank,
+            f"变长 alltoall(数值): {'PASS' if ok else 'FAIL'} "
+            f"(recv={recv_v.tolist()} expected={expected.tolist()})",
+        )
         all_ok &= ok
 
     dist.barrier()

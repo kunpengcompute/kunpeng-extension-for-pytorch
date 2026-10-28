@@ -44,8 +44,9 @@ def worker(rank: int, world_size: int, port: int):
     )
     recv_flat = torch.cat(gather_list)
     ok = torch.equal(recv_flat, expected)
-    rank_log(rank, f"allgather int32: {'PASS' if ok else 'FAIL'} "
-             f"(recv={recv_flat.tolist()})")
+    rank_log(
+        rank, f"allgather int32: {'PASS' if ok else 'FAIL'} (recv={recv_flat.tolist()})"
+    )
     all_ok &= ok
 
     # ── 用例 2：all_gather_into_tensor（float32）────────────
@@ -54,7 +55,9 @@ def worker(rank: int, world_size: int, port: int):
     recv_f = torch.empty(world_size * 8, dtype=torch.float32)
     dist.all_gather_into_tensor(recv_f, send_f)
 
-    expected_f = torch.cat([torch.ones(8, dtype=torch.float32) * r for r in range(world_size)])
+    expected_f = torch.cat(
+        [torch.ones(8, dtype=torch.float32) * r for r in range(world_size)]
+    )
     ok_f = torch.equal(recv_f, expected_f)
     rank_log(rank, f"all_gather_into_tensor float32: {'PASS' if ok_f else 'FAIL'}")
     all_ok &= ok_f

@@ -1,15 +1,10 @@
 /*
  * error.cpp —— 错误信息基础设施
  *
- *   - 线程局部存储（TLS）最近一次错误详文——多线程各自独立
- *   - KuCCL_FAIL 返回后用户可查具体原因（算子/参数/UCG 状态码）
- *   - 成功路径零开销（只在失败时写入）
- *
- * 设计：
- *   - 固定缓冲避免动态分配（错误路径不能再失败）
- *   - 环形保留最近 KUCCL_ERR_HISTORY 条（默认 4，env 可调）
- *   - kucclGetLastError 返回最近一条并清空（一次性读取）
- *   - kucclAppendLastError 追加上下文（调用链逐层补信息）
+ * TLS 存储最近一次错误详文（每线程独立），成功路径零开销。
+ * 固定缓冲（错误路径不能再失败），环形保留 KUCCL_ERR_HISTORY 条（默认 4）。
+ * kucclGetLastError 取最近一条并清空（一次性）；kucclAppendLastError
+ * 追加上下文（底层记状态码，上层补算子名）。
  */
 
 #include "types.hpp"
@@ -69,9 +64,7 @@ void err_record(const char *fmt, ...)
         ++ring.count;
 }
 
-/* 清空本线程错误历史（成功路径调用）：
- * 保证 kucclGetLastError 的语义严格为"自上次成功以来的失败"，
- * 不残留跨算子的旧错误误导排查。 */
+/* 清空本线程错误历史（成功路径调用）——GetLastError 只报本次失败的 */
 void err_clear(void)
 {
     ErrRing &ring = tls_ring();
@@ -125,19 +118,8 @@ void err_append(const char *ctx)
 
 extern "C" {
 
-/* ════════════════════════════════════════════════════════════
- * 对外错误接口（kuccl.h 声明）
- *
- * kucclGetLastError：返回最近一次错误的详文并清空。
- *   - 返回 nullptr = 本线程无错误记录
- *   - 返回的指针在下一次本线程调用 kucclGetLastError 前有效
- *     （一次性读取语义）
- *   - 线程安全：TLS 存储，每线程独立
- *   - 典型用法：
- *       if (kucclAllReduce(...) != KuCCL_SUCCESS) {
- *           fprintf(stderr, "kuccl: %s\n", kucclGetLastError());
- *       }
- * ════════════════════════════════════════════════════════════*/
+/* kucclGetLastError：返回最近一次错误详文并清空（一次性语义）。
+ * nullptr = 本线程无记录；指针在下次调用前有效；TLS 每线程独立。 */
 KuCCL_API const char *kucclGetLastError()
 {
     return kuccl::detail::err_take_last();

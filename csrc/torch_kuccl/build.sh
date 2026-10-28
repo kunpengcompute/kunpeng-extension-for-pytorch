@@ -12,7 +12,7 @@
 #       → libkuccl.so（../kuccl/build/，RPATH 绝对路径 + env.sh 的 LD_LIBRARY_PATH 双保险）
 #
 # 用法（在 torch_kuccl/ 目录执行）：
-#   ./build.sh            # 增量编译 + import 门禁
+#   ./build.sh            # 增量编译 + import 检查
 #   ./build.sh clean      # 清 build/ 与旧 .so 后全量重建
 #   ./build.sh fmt        # 代码风格刷（本目录源文件；.clang-format 在仓库根）
 #
@@ -27,7 +27,7 @@ MODE="${1:-all}"
 # ── 环境：两个独立 env（仓库根 env.sh = PyTorch；kuccl/kuccl_env.sh = 库路径）──
 #   shellcheck disable=SC1091
 source "${LIB_DIR}/kuccl_env.sh"
-if [[ "${CONDA_DEFAULT_ENV:-}" != "${PYTORCH_ENV:-kuccl291}" ]]; then
+if [[ "${CONDA_DEFAULT_ENV:-}" != "${PYTORCH_ENV:-kuccl}" ]]; then
     echo "[env] 未激活 PyTorch 环境，自动 source 仓库根 env.sh ..."
     # shellcheck disable=SC1091
     source "${SCRIPT_DIR}/../env.sh"
@@ -86,13 +86,13 @@ build_torch() {
         date '+%F %T'
     } > "${SCRIPT_DIR}/kuccl/BUILD_INFO"
 
-    # 门禁：import 全链路（ctypes 预加载 UCX/UCG + libkuccl + 注册 backend）
+    # 检查：import 全链路（ctypes 预加载 UCX/UCG + libkuccl + 注册 backend）
     echo ""
     echo "── 验证 import kuccl ..."
     if (cd "${SCRIPT_DIR}" && python -c "import kuccl; print('OK')"); then
-        echo "[门禁 通过] import OK —— 依赖链（kuccl 包 → kuccl_backend.so → libkuccl.so）就绪"
+        echo "[检查 通过] import OK —— 依赖链（kuccl 包 → kuccl_backend.so → libkuccl.so）就绪"
     else
-        echo "[门禁 失败] import 报错。分层排查："
+        echo "[检查 失败] import 报错。分层排查："
         echo "  1) nm -D ${LIB_DIR}/build/libkuccl.so | grep ' T ' | grep -c kuccl   # 应为 12"
         echo "  2) ldd kuccl_backend*.so | grep kuccl    # 应解析到 ${LIB_DIR}/build 的库"
         exit 1

@@ -62,6 +62,7 @@ add_library(kuccl SHARED
     src/error.cpp
     src/lock.cpp
     src/log.cpp
+    src/version.cpp
     src/backend/backend.cpp
     src/backend/xucg.cpp
     src/backend/kupl.cpp
@@ -101,6 +102,30 @@ target_compile_options(kuccl PRIVATE -MMD -MP)
 # KuCCL_EXPORTS：让 kuccl.h 里的 KuCCL_API 宏生效，
 # 公开接口符号可见（其余内部符号保持 hidden）
 target_compile_definitions(kuccl PRIVATE KuCCL_EXPORTS=1)
+# 库版本字符串（kucclGetVersion 输出）——与下面 VERSION 2.6 同步维护
+target_compile_definitions(kuccl PRIVATE KUCCL_VERSION="2.6.0")
+
+# ★ 构建戳：git HEAD + 时间，内嵌进 .so（防"跑旧库"事故的根基）。
+#   Hash 优先取 build.sh 注入的 -DKUCCL_GIT_HEAD_EXTERN（build.sh 的 git
+#   调用已被证实可用）；仅当未注入时才走 execute_process 兜底——某些
+#   环境下 cmake 子进程里的 git 会失败（safe.directory/PATH 差异）→
+#   "unknown" → 戳校验永远失败且极难定位。
+if(DEFINED KUCCL_GIT_HEAD_EXTERN AND NOT KUCCL_GIT_HEAD_EXTERN STREQUAL "")
+    set(KUCCL_GIT_HEAD "${KUCCL_GIT_HEAD_EXTERN}")
+else()
+    execute_process(
+        COMMAND git rev-parse --short HEAD
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        OUTPUT_VARIABLE KUCCL_GIT_HEAD
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+        RESULT_VARIABLE KUCCL_GIT_RC)
+    if(NOT KUCCL_GIT_RC EQUAL 0)
+        set(KUCCL_GIT_HEAD "unknown")
+    endif()
+endif()
+string(TIMESTAMP KUCCL_BUILD_TS "%Y-%m-%d %H:%M:%S")
+target_compile_definitions(kuccl PRIVATE KUCCL_BUILD_INFO="git:${KUCCL_GIT_HEAD} built:${KUCCL_BUILD_TS}")
 
 set_target_properties(kuccl PROPERTIES
     LIBRARY_OUTPUT_NAME kuccl                # libkuccl.so

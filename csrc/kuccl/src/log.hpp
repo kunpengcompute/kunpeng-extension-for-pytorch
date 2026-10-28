@@ -2,28 +2,15 @@
 #define KuCCL_LOG_HPP_
 
 /*
- * kuccl 统一日志（四级分层）
+ * kuccl 统一日志
  *
- * 四个级别（TRACE/INFO/WARN/ERROR）：
- *   KuCCL_LOG_TRACE - 逐调用细节（地址交换、dt 缓存命中……只用于问题定位）
- *   KuCCL_LOG_INFO  - 关键里程碑（进程初始化完成、建组成功、拓扑结果）
- *   KuCCL_LOG_WARN  - 可继续但有隐患（回退路径、资源复用失败降级）
- *   KuCCL_LOG_ERROR - 失败路径（初始化失败、算子报错）
- *
- * 级别控制：环境变量 KUCCL_LOG_LEVEL，取值 OFF/ERROR/WARN/INFO/TRACE
- *           （DEBUG=TRACE 别名；也接受数字 0-4；大小写不敏感），
- *           默认 WARN——生产静默，只出警告和错误；排障时调到 INFO/TRACE。
- *
- * rank 过滤：环境变量 KUCCL_LOG_RANKS（"0,3-5,17"——逗号分隔支持区间，
- *           只放行列出的 rank；未设 = 全放行）。大 world 排障时把
- *           INFO/TRACE 限制到少数 rank，避免上百进程刷屏。
- *           注意过滤对所有级别生效（含 ERROR）。
- *
- * 输出：stderr（不污染 benchmark 的 stdout 解析），单行格式：
- *       [KuCCL][LEVEL][HH:MM:SS.mmm][+123.4s][host][rank R] message (file:line)
- *       - 毫秒墙钟 + 相对库加载的流逝秒（steady_clock，看阶段用）
- *       - host：多节点日志聚合到一处时区分来源机器
- *       - 整行一次写出（多线程不交错）
+ * 级别由 KUCCL_LOG_LEVEL 控制（OFF/ERROR/WARN/INFO/TRACE，默认 WARN）：
+ *   TRACE 逐调用细节（仅排障）   INFO 关键里程碑
+ *   WARN  可继续但有隐患         ERROR 失败路径
+ * 落盘：KUCCL_LOG_FILE=path 在 stderr 之外同步写文件；"%r" 按 rank 分文件。
+ * 过滤：KUCCL_LOG_RANKS="0,3-5" 只放行列出的 rank（对所有级别生效）。
+ * 输出为 stderr 单行（不污染 stdout 解析，整行一次写出）：
+ *   [KuCCL][LEVEL][HH:MM:SS.mmm][+123.4s][host][rank R] message (file:line)
  */
 
 #include "types.hpp"

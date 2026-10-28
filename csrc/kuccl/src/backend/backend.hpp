@@ -89,7 +89,7 @@ struct Ops {
     kucclResult_t (*flush)(kucclComm *comm);
 };
 
-/* 按名取后端。"xucg"（默认，"ucg" 为别名）/ "kupl"（预留存根）。
+/* 按名取后端："xucg"（默认，"ucg" 为别名）/ "kupl"（单机 shm）。
  * 未知名字返回 nullptr。 */
 const Ops *get(const char *name);
 

@@ -32,7 +32,7 @@ import torch
 import torch.distributed as dist
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from conftest import spawn_and_run, init_group, rank_log, DEFAULT_MASTER_ADDR
+from conftest import spawn_and_run, init_group, rank_log
 
 
 def worker(rank: int, world_size: int, port: int):
@@ -65,7 +65,7 @@ def worker(rank: int, world_size: int, port: int):
     out = [torch.zeros(1, dtype=torch.int32) for _ in range(world_size)]
     dist.all_gather(out, t)
     got = [x.item() for x in out]
-    ok = (got == list(range(world_size)))
+    ok = got == list(range(world_size))
     rank_log(rank, f"allgather 验证: {got} -> {'PASS' if ok else 'FAIL'}")
 
     dist.barrier()

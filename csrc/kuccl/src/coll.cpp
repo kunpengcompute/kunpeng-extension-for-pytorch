@@ -23,13 +23,8 @@
 
 namespace {
 
-/* ════════════════════════════════════════════════════════════
- * 看门狗超时
- *
- * KUCCL_TEST_TIMEOUT_MS=N（默认 0=无限等待，兼容旧行为）：
- *   超过 N 毫秒未完成 → 返回 KuCCL_FAIL + 错误信息（含已等待时长）。
- *   防止"对端掉线导致 kucclTest 永久 INPROGRESS"卡死整进程。
- * ==========================================================================*/
+/* 看门狗：KUCCL_TEST_TIMEOUT_MS=N（默认 0 = 无限等待）。
+ * 超时返回 KuCCL_FAIL + 错误信息，防止对端掉线卡死整进程。 */
 inline int64_t test_timeout_ms()
 {
     static const int64_t v = [] {
@@ -221,13 +216,8 @@ KuCCL_API kucclResult_t kucclAllToAll(const void *sendbuff, void *recvbuff, size
     return KuCCL_SUCCESS;
 }
 
-/* ----------------------------------------------------------------------------
- * kucclTest —— 查询异步请求是否完成
- *
- * ★ 性能关键：先由后端 ucg_request_test（数据可能已就绪，直接返回），
- *   没就绪才由后端推进（ucg_progress）。
- *   完成/出错时后端回收私有状态，这里释放请求外壳。
- * --------------------------------------------------------------------------*/
+/* kucclTest —— 查询请求完成：后端先 test（就绪即返回）再推进；
+ * 完成/出错时后端回收私有状态，这里释放请求外壳。 */
 KuCCL_API kucclResult_t kucclTest(kucclRequest_t *request, int *flag, kucclStatus_t *status)
 {
     if (!request || !*request || !flag || !status)

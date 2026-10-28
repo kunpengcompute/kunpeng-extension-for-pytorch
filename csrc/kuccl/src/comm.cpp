@@ -11,8 +11,7 @@
  * 后端选择：config.backend > 环境变量 KUCCL_BACKEND_TYPE
  * > 默认 "xucg"。底层实现由 xucg 后端承接。
  *
- * ★ extern "C" 必须同时包裹声明与实现：只包声明时，实现按 C++ 修饰名
- *   编译，链接时 undefined symbol。
+ * extern "C" 须同时包裹声明与实现，否则链接 undefined symbol。
  */
 
 #include "comm_impl.hpp"
@@ -133,9 +132,13 @@ static const kuccl::backend::Ops *kuccl_resolve_backend(const kucclConfig_t *con
 KuCCL_API kucclResult_t kucclCommInitRankConfig(kucclComm_t *comm, int nranks, kucclUniqueId commId, int rank,
                                                 kucclConfig_t *config)
 {
-    if (!comm || nranks <= 0 || rank < 0 || rank >= nranks)
+    if (!comm || nranks <= 0 || rank < 0 || rank >= nranks) {
+        kuccl::detail::err_record("kucclCommInitRankConfig: bad args (comm=%p nranks=%d rank=%d)",
+                                  static_cast<const void *>(comm), nranks, rank);
         return KuCCL_FAIL;
+    }
     if (!config || !config->oob_allgather) {
+        kuccl::detail::err_record("kucclCommInitRankConfig: config->oob_allgather is required");
         KuCCL_LOG_ERROR(rank, "kucclCommInitRankConfig: config->oob_allgather is required");
         return KuCCL_FAIL;
     }
@@ -151,8 +154,10 @@ KuCCL_API kucclResult_t kucclCommInitRankConfig(kucclComm_t *comm, int nranks, k
     (void)commId; /* commId 参与全局组区分（当前用 bootstrap token 保证唯一性）*/
 
     auto *c = new (std::nothrow) kucclComm();
-    if (!c)
+    if (!c) {
+        kuccl::detail::err_record("kucclCommInitRankConfig: comm alloc FAILED");
         return KuCCL_FAIL;
+    }
     std::memset(c, 0, sizeof(kucclComm));
     c->rank = rank;
     c->nranks = nranks;
@@ -162,6 +167,7 @@ KuCCL_API kucclResult_t kucclCommInitRankConfig(kucclComm_t *comm, int nranks, k
 
     /* 后端进程级一次性初始化（首次调用才真正执行）*/
     if (be->process_init(c) != KuCCL_SUCCESS) {
+        kuccl::detail::err_record("kucclCommInitRankConfig: backend '%s' process_init FAILED", be->name);
         be->group_fini(c); /* 回收 process_init 已分配的私有状态（幂等） */
         delete c;
         return KuCCL_FAIL;
@@ -169,6 +175,7 @@ KuCCL_API kucclResult_t kucclCommInitRankConfig(kucclComm_t *comm, int nranks, k
 
     /* 后端建组（bootstrap 交换 + rank 映射 + 底层组创建）*/
     if (be->group_init(c) != KuCCL_SUCCESS) {
+        kuccl::detail::err_append("kucclCommInitRankConfig: backend group_init FAILED");
         be->group_fini(c); /* 回收部分初始化的私有状态 */
         delete c;
         return KuCCL_FAIL;
@@ -191,15 +198,9 @@ KuCCL_API kucclResult_t kucclCommDestroy(kucclComm_t comm)
     return KuCCL_SUCCESS;
 }
 
-/* ════════════════════════════════════════════════════════════
- * kucclCommAbort —— 安全终止
- *
- * 语义：
- *   - 立即标记 aborted：后续所有算子返回 FAIL（带错误信息）
- *   - 不保证在飞请求数据完整（故障恢复用，非正常销毁）
- *   - 幂等、线程安全（atomic + lock）
- *   - 正常退出仍用 kucclCommDestroy（Abort 后也可再 Destroy 清资源）
- * ════════════════════════════════════════════════════════════*/
+/* kucclCommAbort —— 安全终止：置 aborted 后一切算子返回 FAIL；
+ * 不保证在飞请求完整（故障恢复用）；幂等、线程安全；
+ * 正常退出用 Destroy（Abort 后仍可 Destroy 清资源）。 */
 KuCCL_API kucclResult_t kucclCommAbort(kucclComm_t comm)
 {
     if (!comm)
@@ -215,9 +216,7 @@ KuCCL_API kucclResult_t kucclCommAbort(kucclComm_t comm)
                               comm->nranks);
     KuCCL_LOG_WARN(comm->rank, "kucclCommAbort: comm marked ABORTED");
 
-    /* 在飞请求：尽力清理后端私有状态（非持久化的由持有方 Test 时
-     * 发现 aborted 状态报错——不强行 cancel 在飞请求，
-     * 尽力而为语义） */
+    /* 在飞请求尽力清理，不强行 cancel（尽力而为语义） */
     comm->be->comm_purge(comm);
     return KuCCL_SUCCESS;
 }
